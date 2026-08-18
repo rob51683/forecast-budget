@@ -1,0 +1,1502 @@
+<!DOCTYPE html>
+<script type="application/json" id="cowork-artifact-meta">
+{
+  "name": "Fy28 Territory Budget",
+  "schemaVersion": 1,
+  "description": "FY28 budget planning dashboard, live-synced from a Google Sheet on every load (with a fallback snapshot if the fetch is blocked). Global fiscal-year and territory filters scope every chart and table: opps and spend by territory/quarter, a channel-mix heatmap (channel x territory), total spend and projected opps per territory, plus a full line-item detail table mirroring the master planning sheet (grouped by channel, subtotals, grand total). Totals are shown in each table view rather than annotated on the charts themselves. Source: live Google Sheet (https://docs.google.com/spreadsheets/d/1uYimlEb3AbTUQ_Mev2is1z_EaOqiOtwK8GFdDyk1AmQ).",
+  "mcpTools": [],
+  "mcpServerNames": []
+}
+</script>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>FY28 Budget — Opps &amp; Spend by Territory</title>
+<style>
+  :root {
+    color-scheme: light;
+  }
+  .viz-root {
+    color-scheme: light;
+    --surface-1:      #fcfcfb;
+    --page:           #f9f9f7;
+    --text-primary:   #0b0b0b;
+    --text-secondary: #52514e;
+    --text-muted:     #898781;
+    --grid:           #e1e0d9;
+    --baseline:       #c3c2b7;
+    --border:         rgba(11,11,11,0.10);
+    --hover-wash:     rgba(11,11,11,0.04);
+
+    --terr-US:         #2a78d6;
+    --terr-EU-France:   #eb6834;
+    --terr-EU-UK:      #1baf7a;
+    --terr-EU-SWIAUS: #eda100;
+    --terr-EU-Nordics: #e87ba4;
+    --terr-EU-DE1:     #008300;
+    --terr-EU-DE2:     #4a3aa7;
+    --terr-Other:      #a6a49c;
+
+    --seq-100: #cde2fb; --seq-250: #86b6ef; --seq-400: #3987e5; --seq-550: #1c5cab;
+    --ink-dark: #0b0b0b; --ink-light: #ffffff;
+    --seq-ink-1: var(--ink-dark); --seq-ink-2: var(--ink-dark); --seq-ink-3: var(--ink-dark); --seq-ink-4: var(--ink-light);
+    --status-good: #0ca30c; --status-warning: #fab219;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:where(:not([data-theme="light"])) .viz-root {
+      color-scheme: dark;
+      --surface-1:      #1a1a19;
+      --page:           #0d0d0d;
+      --text-primary:   #ffffff;
+      --text-secondary: #c3c2b7;
+      --text-muted:     #898781;
+      --grid:           #2c2c2a;
+      --baseline:       #383835;
+      --border:         rgba(255,255,255,0.10);
+      --hover-wash:     rgba(255,255,255,0.06);
+
+      --terr-US:         #3987e5;
+      --terr-EU-France:   #d95926;
+      --terr-EU-UK:      #199e70;
+      --terr-EU-SWIAUS: #c98500;
+      --terr-EU-Nordics: #d55181;
+      --terr-EU-DE1:     #008300;
+      --terr-EU-DE2:     #9085e9;
+      --terr-Other:      #6f6d66;
+
+      --seq-100: #104281; --seq-250: #1c5cab; --seq-400: #3987e5; --seq-550: #86b6ef;
+      --seq-ink-1: var(--ink-light); --seq-ink-2: var(--ink-light); --seq-ink-3: var(--ink-dark); --seq-ink-4: var(--ink-dark);
+    }
+  }
+  :root[data-theme="dark"] .viz-root {
+    color-scheme: dark;
+    --surface-1:      #1a1a19;
+    --page:           #0d0d0d;
+    --text-primary:   #ffffff;
+    --text-secondary: #c3c2b7;
+    --text-muted:     #898781;
+    --grid:           #2c2c2a;
+    --baseline:       #383835;
+    --border:         rgba(255,255,255,0.10);
+    --hover-wash:     rgba(255,255,255,0.06);
+
+    --terr-US:         #3987e5;
+    --terr-EU-France:   #d95926;
+    --terr-EU-UK:      #199e70;
+    --terr-EU-SWIAUS: #c98500;
+    --terr-EU-Nordics: #d55181;
+    --terr-EU-DE1:     #008300;
+    --terr-EU-DE2:     #9085e9;
+    --terr-Other:      #6f6d66;
+
+    --seq-100: #104281; --seq-250: #1c5cab; --seq-400: #3987e5; --seq-550: #86b6ef;
+    --seq-ink-1: var(--ink-light); --seq-ink-2: var(--ink-light); --seq-ink-3: var(--ink-dark); --seq-ink-4: var(--ink-dark);
+  }
+
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; padding: 0;
+    background: var(--page);
+    font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  .viz-root { background: var(--page); min-height: 100vh; }
+  .wrap { max-width: 1200px; margin: 0 auto; padding: 32px 24px 48px; }
+
+  .top-row { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
+  h1 { font-size: 24px; font-weight: 700; color: var(--text-primary); margin: 0 0 8px; }
+  .subtitle { font-size: 14px; color: var(--text-secondary); margin: 0; line-height: 1.5; max-width: 780px; }
+  .data-status { display: flex; align-items: center; gap: 8px; margin: 8px 0 0; font-size: 12px; color: var(--text-muted); }
+  .status-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--text-muted); flex-shrink: 0; }
+  .status-dot.live { background: var(--status-good); }
+  .status-dot.fallback { background: var(--status-warning); }
+  .refresh-btn {
+    font-size: 11.5px; color: var(--text-secondary); background: none;
+    border: 1px solid var(--border); border-radius: 6px; padding: 2px 9px;
+    cursor: pointer; font-family: inherit; margin-left: 2px;
+  }
+  .refresh-btn:hover { background: var(--hover-wash); }
+  .refresh-btn:disabled { opacity: 0.5; cursor: default; }
+  .data-status a { color: inherit; text-decoration: underline; }
+
+  .theme-toggle {
+    display: flex; align-items: center; gap: 6px;
+    background: var(--surface-1); border: 1px solid var(--border);
+    border-radius: 20px; padding: 4px; flex-shrink: 0;
+  }
+  .theme-toggle button {
+    border: none; background: transparent; cursor: pointer;
+    padding: 6px 12px; border-radius: 16px; font-size: 12.5px;
+    color: var(--text-secondary); font-family: inherit; font-weight: 600;
+  }
+  .theme-toggle button.active { background: var(--terr-US); color: #fff; }
+
+  .filter-row {
+    display: flex; align-items: center; gap: 22px; flex-wrap: wrap;
+    margin-top: 20px; padding: 12px 16px;
+    background: var(--surface-1); border: 1px solid var(--border); border-radius: 10px;
+  }
+  .filter-group { display: flex; align-items: center; gap: 9px; }
+  .filter-label { font-size: 12px; font-weight: 600; color: var(--text-secondary); }
+  .filter-seg {
+    display: flex; gap: 3px; background: var(--page);
+    border: 1px solid var(--border); border-radius: 16px; padding: 3px;
+  }
+  .filter-seg button {
+    border: none; background: transparent; cursor: pointer;
+    padding: 5px 12px; border-radius: 13px; font-size: 12px;
+    color: var(--text-secondary); font-family: inherit; font-weight: 600;
+  }
+  .filter-seg button.active { background: var(--terr-US); color: #fff; }
+  .filter-select {
+    font-size: 12.5px; color: var(--text-primary); background: var(--page);
+    border: 1px solid var(--border); border-radius: 8px; padding: 5px 10px; font-family: inherit;
+  }
+  .filter-reset {
+    font-size: 11.5px; color: var(--text-secondary); background: none;
+    border: 1px solid var(--border); border-radius: 6px; padding: 5px 10px;
+    cursor: pointer; font-family: inherit;
+  }
+  .filter-reset:hover { background: var(--hover-wash); }
+  .filter-summary { font-size: 12px; color: var(--text-muted); margin-left: auto; }
+
+  .card {
+    background: var(--surface-1);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 22px 24px 18px;
+    margin-top: 22px;
+  }
+  .card-head {
+    display: flex; align-items: baseline; justify-content: space-between;
+    gap: 12px; margin-bottom: 4px; flex-wrap: wrap;
+  }
+  .card h2 { font-size: 15.5px; font-weight: 700; color: var(--text-primary); margin: 0 0 2px; }
+  .card .desc { font-size: 12.5px; color: var(--text-muted); margin: 0 0 10px; }
+  .view-toggle {
+    font-size: 11.5px; color: var(--text-secondary); background: none;
+    border: 1px solid var(--border); border-radius: 6px; padding: 4px 10px;
+    cursor: pointer; font-family: inherit; white-space: nowrap;
+  }
+  .view-toggle:hover { background: var(--hover-wash); }
+
+  .view-seg {
+    display: flex; gap: 3px; background: var(--page);
+    border: 1px solid var(--border); border-radius: 16px; padding: 3px; flex-shrink: 0;
+  }
+  .view-seg button {
+    border: none; background: transparent; cursor: pointer;
+    padding: 4px 11px; border-radius: 13px; font-size: 11.5px;
+    color: var(--text-secondary); font-family: inherit; font-weight: 600; white-space: nowrap;
+  }
+  .view-seg button.active { background: var(--terr-US); color: #fff; }
+
+  .row-2col { display: flex; gap: 20px; flex-wrap: wrap; }
+  .row-2col .card { flex: 1 1 340px; margin-top: 0; }
+
+  svg { display: block; width: 100%; height: auto; overflow: visible; }
+  .axis-label { fill: var(--text-muted); font-size: 11px; }
+  .tick-label { fill: var(--text-secondary); font-size: 11.5px; }
+  .grid-line { stroke: var(--grid); stroke-width: 1; }
+  .baseline-line { stroke: var(--baseline); stroke-width: 1; }
+  .total-label { fill: var(--text-primary); font-size: 12.5px; font-weight: 700; }
+  .bar-value-label { fill: var(--text-primary); font-size: 11px; font-weight: 600; }
+  .hit-rect { fill: transparent; cursor: pointer; }
+  .hit-rect:hover { fill: var(--hover-wash); }
+
+  .legend { display: flex; flex-wrap: wrap; gap: 14px 20px; margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--border); }
+  .legend-item { display: flex; align-items: center; gap: 7px; font-size: 12.5px; color: var(--text-secondary); }
+  .legend-swatch { width: 11px; height: 11px; border-radius: 3px; flex-shrink: 0; }
+  .legend-seq-swatch { width: 16px; height: 11px; border-radius: 2px; flex-shrink: 0; }
+  .legend-hollow-swatch { width: 16px; height: 11px; border-radius: 2px; flex-shrink: 0; border: 1px solid var(--grid); background: var(--surface-1); box-sizing: border-box; }
+
+  .heat-cell-label { font-size: 11.5px; font-weight: 700; font-variant-numeric: tabular-nums; }
+  .heat-total-label { fill: var(--text-primary); font-size: 11.5px; font-weight: 700; font-variant-numeric: tabular-nums; }
+  .coverage-badge { fill: var(--text-secondary); font-size: 12px; font-weight: 700; font-variant-numeric: tabular-nums; }
+  .year-divider { stroke: var(--baseline); stroke-width: 1.5; }
+
+  .tooltip {
+    position: fixed; pointer-events: none; z-index: 50;
+    background: var(--surface-1); border: 1px solid var(--border);
+    border-radius: 8px; padding: 10px 12px; font-size: 12.5px;
+    color: var(--text-secondary); box-shadow: 0 6px 20px rgba(0,0,0,0.18);
+    max-width: 260px; opacity: 0; transition: opacity 0.08s ease;
+  }
+  .tooltip.show { opacity: 1; }
+  .tooltip .tt-title { font-weight: 700; color: var(--text-primary); margin-bottom: 6px; font-size: 12.5px; }
+  .tooltip .tt-row { display: flex; align-items: center; gap: 6px; justify-content: space-between; gap: 14px; padding: 1px 0; }
+  .tooltip .tt-key { display: flex; align-items: center; gap: 6px; }
+  .tooltip .tt-swatch { width: 9px; height: 9px; border-radius: 2px; flex-shrink: 0; }
+  .tooltip .tt-val { font-weight: 700; color: var(--text-primary); }
+  .tooltip .tt-total { margin-top: 6px; padding-top: 6px; border-top: 1px solid var(--border); display:flex; justify-content:space-between; gap:14px; }
+
+  table.data-table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+  table.data-table caption { display: none; }
+  table.data-table th, table.data-table td {
+    text-align: right; padding: 7px 10px; border-bottom: 1px solid var(--border);
+    color: var(--text-secondary); font-variant-numeric: tabular-nums;
+  }
+  table.data-table th:first-child, table.data-table td:first-child { text-align: left; color: var(--text-primary); font-variant-numeric: normal; }
+  table.data-table thead th { color: var(--text-primary); font-weight: 700; border-bottom: 2px solid var(--baseline); }
+  table.data-table tr.detail-group-row td, table.data-table tr.detail-group-row th { background: var(--hover-wash); font-weight: 700; color: var(--text-primary); }
+  table.data-table tr.detail-removed-row td, table.data-table tr.detail-removed-row th { text-decoration: line-through; color: var(--text-muted); }
+  table.data-table tr.detail-grand-row td, table.data-table tr.detail-grand-row th { background: var(--hover-wash); font-weight: 800; color: var(--text-primary); border-top: 2px solid var(--baseline); }
+  table.data-table td.detail-note { text-align: left; color: var(--text-muted); font-size: 11.5px; font-variant-numeric: normal; }
+  table.data-table td.detail-center, table.data-table th.detail-center { text-align: center; }
+  #detailTable { overflow-x: auto; }
+
+  footer.notes { margin-top: 22px; font-size: 11.5px; color: var(--text-muted); line-height: 1.6; }
+  footer.notes p { margin: 0 0 4px; }
+</style>
+</head>
+<body>
+<div class="viz-root">
+  <div class="wrap">
+    <div class="top-row">
+      <div>
+        <h1>FY28 Budget Items — Opportunities &amp; Spend by Territory</h1>
+        <p class="subtitle" id="subtitle-text"></p>
+        <p class="data-status" id="data-status">
+          <span class="status-dot" id="status-dot"></span>
+          <span id="status-text">Loading…</span>
+          <button type="button" id="refresh-btn" class="refresh-btn">Refresh</button>
+        </p>
+      </div>
+      <div class="theme-toggle" role="group" aria-label="Theme">
+        <button type="button" data-theme-btn="light">Light</button>
+        <button type="button" data-theme-btn="dark">Dark</button>
+        <button type="button" data-theme-btn="system">System</button>
+      </div>
+    </div>
+
+    <div class="filter-row" role="group" aria-label="Filters">
+      <div class="filter-group">
+        <span class="filter-label">Fiscal year</span>
+        <div class="filter-seg" id="fy-filter">
+          <button type="button" data-fy="All" class="active">All</button>
+          <button type="button" data-fy="FY27">FY27</button>
+          <button type="button" data-fy="FY28">FY28</button>
+        </div>
+      </div>
+      <div class="filter-group">
+        <span class="filter-label">Territory</span>
+        <select class="filter-select" id="terr-filter">
+          <option value="All">All territories</option>
+        </select>
+      </div>
+      <div class="filter-group">
+        <span class="filter-label">Budget currency</span>
+        <div class="filter-seg" id="currency-filter">
+          <button type="button" data-currency="EUR" class="active">Budget €</button>
+          <button type="button" data-currency="LOCAL">Budget (Local)</button>
+        </div>
+      </div>
+      <button type="button" class="filter-reset" id="filter-reset">Reset filters</button>
+      <span class="filter-summary" id="filter-summary"></span>
+    </div>
+
+    <!-- Panel A: Opps by territory by quarter -->
+    <div class="card">
+      <div class="card-head">
+        <div>
+          <h2>Opps by territory, by quarter</h2>
+          <p class="desc" id="descA">What each territory is projected to get, quarter over quarter</p>
+        </div>
+        <div class="view-seg" data-view-group="chartA">
+          <button type="button" data-view="bar" class="active">Bar</button>
+          <button type="button" data-view="heatmap">Heatmap</button>
+          <button type="button" data-view="table">Table</button>
+        </div>
+      </div>
+      <div id="chartA-bar">
+        <svg id="chartA" viewBox="0 0 1100 400"></svg>
+        <div class="legend" id="legendA"></div>
+      </div>
+      <div id="chartA-heatmap" style="display:none;">
+        <svg id="chartA-hm" viewBox="0 0 1100 330"></svg>
+        <div class="legend" id="legendA-hm"></div>
+      </div>
+      <div id="chartA-table" style="display:none;"></div>
+    </div>
+
+    <!-- Panel A3: Channel mix heatmap -->
+    <div class="card">
+      <div class="card-head">
+        <div>
+          <h2>Opportunities by channel, by territory</h2>
+          <p class="desc">Darker cells mean more opps; hollow cells mean that channel isn't used there</p>
+        </div>
+        <button class="view-toggle" data-toggle-for="chartI">View as table</button>
+      </div>
+      <div id="chartI-chart"><svg id="chartI" viewBox="0 0 1100 402"></svg></div>
+      <div id="chartI-table" style="display:none;"></div>
+      <div class="legend" id="legendI"></div>
+    </div>
+
+    <!-- Panel B: Spend by territory by quarter -->
+    <div class="card">
+      <div class="card-head">
+        <div>
+          <h2>Spend by territory, by quarter</h2>
+          <p class="desc" id="descB">Where the budget is going, quarter over quarter</p>
+        </div>
+        <div class="view-seg" data-view-group="chartB">
+          <button type="button" data-view="bar" class="active">Bar</button>
+          <button type="button" data-view="heatmap">Heatmap</button>
+          <button type="button" data-view="table">Table</button>
+        </div>
+      </div>
+      <div id="chartB-bar">
+        <svg id="chartB" viewBox="0 0 1100 400"></svg>
+        <div class="legend" id="legendB"></div>
+      </div>
+      <div id="chartB-heatmap" style="display:none;">
+        <svg id="chartB-hm" viewBox="0 0 1100 330"></svg>
+        <div class="legend" id="legendB-hm"></div>
+      </div>
+      <div id="chartB-table" style="display:none;"></div>
+    </div>
+
+    <!-- Panel C+D: totals side by side -->
+    <div class="row-2col">
+      <div class="card">
+        <div class="card-head">
+          <div>
+            <h2>Total spend by territory</h2>
+            <p class="desc" id="descC">Budget, by territory</p>
+          </div>
+          <button class="view-toggle" data-toggle-for="chartC">View as table</button>
+        </div>
+        <div id="chartC-chart"><svg id="chartC" viewBox="0 0 520 380"></svg></div>
+        <div id="chartC-table" style="display:none;"></div>
+      </div>
+      <div class="card">
+        <div class="card-head">
+          <div>
+            <h2>Total opps projected by territory</h2>
+            <p class="desc" id="descD">Opportunity count (pipeline), by territory</p>
+          </div>
+          <button class="view-toggle" data-toggle-for="chartD">View as table</button>
+        </div>
+        <div id="chartD-chart"><svg id="chartD" viewBox="0 0 520 380"></svg></div>
+        <div id="chartD-table" style="display:none;"></div>
+      </div>
+    </div>
+
+    <!-- Panel E: full line-item detail, mirrors the master planning sheet -->
+    <div class="card">
+      <div class="card-head">
+        <div>
+          <h2>Budget items — full detail</h2>
+          <p class="desc" id="descE">Every planned line item, grouped by channel like the master sheet — quarter and opps per item, subtotals per channel, grand total at the bottom. Respects the filters above.</p>
+        </div>
+      </div>
+      <div id="detailTable"></div>
+    </div>
+
+    <footer class="notes">
+      <p>Source: live Google Sheet, auto-refreshed on every load (<a href="https://docs.google.com/spreadsheets/d/1uYimlEb3AbTUQ_Mev2is1z_EaOqiOtwK8GFdDyk1AmQ/edit?gid=436189910#gid=436189910" target="_blank" rel="noopener">open sheet</a>). Territory tags are cleaned from raw region codes — typo'd or drifted codes (e.g. a stray "EU-DE3"/"EU-DE4") are corrected using the item name; multi-region or DE-wide items roll up to "Other". New channel sections in the sheet are picked up automatically. If the live fetch is blocked by the browser, the dashboard falls back to the last known snapshot and flags this above.</p>
+      <p id="footnote-2"></p>
+    </footer>
+  </div>
+</div>
+
+<div class="tooltip" id="tooltip"></div>
+
+<script>
+let DATA = null;
+const FALLBACK_DATA = {"quarters": ["FY27-Q2", "FY27-Q3", "FY27-Q4", "FY28-Q1", "FY28-Q2", "FY28-Q3", "FY28-Q4"], "territories": ["US", "EU-France", "EU-UK", "EU-SWIAUS", "EU-Nordics", "EU-DE1", "EU-DE2", "Other"], "spend_by_terr_qtr": {"US": [13300, 43700, 21280, 112100, 66880, 51680, 22800], "EU-France": [0, 0, 9500, 8000, 31342, 8000, 0], "EU-UK": [0, 0, 0, 8000, 8000, 8000, 0], "EU-SWIAUS": [0, 0, 0, 8000, 17500, 8000, 15000], "EU-Nordics": [0, 0, 0, 8000, 17500, 64000, 0], "EU-DE1": [0, 0, 0, 8000, 8000, 8000, 0], "EU-DE2": [0, 0, 0, 8000, 8000, 8000, 0], "Other": [0, 0, 0, 9500, 5000, 22200, 32000]}, "opps_by_terr_qtr": {"US": [2, 4, 1, 13, 7, 7, 2], "EU-France": [0, 0, 1, 2, 6, 2, 0], "EU-UK": [0, 0, 0, 2, 2, 2, 0], "EU-SWIAUS": [0, 0, 0, 3, 4, 3, 2], "EU-Nordics": [0, 0, 0, 2, 3, 8, 0], "EU-DE1": [0, 0, 0, 3, 3, 3, 1], "EU-DE2": [0, 0, 0, 3, 3, 3, 1], "Other": [0, 0, 0, 1, 2, 4, 4]}, "spend_total_by_terr": {"US": 336300, "EU-France": 56842, "EU-UK": 24000, "EU-SWIAUS": 48500, "EU-Nordics": 89500, "EU-DE1": 24000, "EU-DE2": 24000, "Other": 68700}, "opps_total_by_terr": {"US": 37.5, "EU-France": 11, "EU-UK": 6, "EU-SWIAUS": 12, "EU-Nordics": 13, "EU-DE1": 10, "EU-DE2": 10, "Other": 11}, "channels": ["Conferences", "Co-marketing events", "Digital", "Organic", "Online events", "AI search", "User events (ASUG)"], "opps_by_channel_terr": {"Conferences": {"US": 24, "EU-France": 4, "EU-UK": 0, "EU-SWIAUS": 1, "EU-Nordics": 6, "EU-DE1": 0, "EU-DE2": 0, "Other": 9}, "Co-marketing events": {"US": 3, "EU-France": 3, "EU-UK": 3, "EU-SWIAUS": 3, "EU-Nordics": 3, "EU-DE1": 3, "EU-DE2": 3, "Other": 1}, "Digital": {"US": 3, "EU-France": 3, "EU-UK": 3, "EU-SWIAUS": 3, "EU-Nordics": 3, "EU-DE1": 3, "EU-DE2": 3, "Other": 0}, "Organic": {"US": 0, "EU-France": 0, "EU-UK": 0, "EU-SWIAUS": 4, "EU-Nordics": 0, "EU-DE1": 4, "EU-DE2": 4, "Other": 0}, "Online events": {"US": 3, "EU-France": 1, "EU-UK": 0, "EU-SWIAUS": 1, "EU-Nordics": 1, "EU-DE1": 0, "EU-DE2": 0, "Other": 1}, "AI search": {"US": 3, "EU-France": 0, "EU-UK": 0, "EU-SWIAUS": 0, "EU-Nordics": 0, "EU-DE1": 0, "EU-DE2": 0, "Other": 0}, "User events (ASUG)": {"US": 1.5, "EU-France": 0, "EU-UK": 0, "EU-SWIAUS": 0, "EU-Nordics": 0, "EU-DE1": 0, "EU-DE2": 0, "Other": 0}}, "meta": {"total_spend_all": 800842, "untagged_budget": 129000, "total_opps_tagged": 110.5, "line_items": 73}, "channel_order": ["Conferences", "User events (ASUG)", "Co-marketing events", "Online events", "Analyst", "Digital", "Organic", "AI search"], "line_items": [{"channel": "Conferences", "item": "10-SSOW LATAM Mexico City 2026", "territory": "US", "fy": "FY27", "fyQtr": "FY27-Q2", "status": "New", "budgetEUR": 13300.0, "budgetLocal": 17500.0, "budgetLocalCurrency": "$", "opps": 2.0, "note": "3 passes, updated pricing", "removed": false}, {"channel": "Conferences", "item": "11-Millennium CFO Alliance Austin 2026", "territory": "US", "fy": "FY27", "fyQtr": "FY27-Q3", "status": "New", "budgetEUR": 34200.0, "budgetLocal": 45000.0, "budgetLocalCurrency": "$", "opps": 3.0, "note": "would be heavily negotiated", "removed": false}, {"channel": "Conferences", "item": "02-Millennium CFO Alliance Houston 2026", "territory": "US", "fy": "FY28", "fyQtr": "FY28-Q1", "status": "New", "budgetEUR": 34200.0, "budgetLocal": 45000.0, "budgetLocalCurrency": "$", "opps": 3.0, "note": "would be heavily negotiated", "removed": false}, {"channel": "Conferences", "item": "03-SSOW US  Orlando 2027", "territory": "US", "fy": "FY28", "fyQtr": "FY28-Q1", "status": "New", "budgetEUR": 24320.0, "budgetLocal": 32000.0, "budgetLocalCurrency": "$", "opps": 3.0, "note": "Last yr price", "removed": false}, {"channel": "Conferences", "item": "03-GBS Select Mtgs Orlando 2027", "territory": "US", "fy": "FY28", "fyQtr": "FY28-Q1", "status": "Same", "budgetEUR": 22800.0, "budgetLocal": 30000.0, "budgetLocalCurrency": "$", "opps": 3.0, "note": "Last yr price", "removed": false}, {"channel": "Conferences", "item": "05-Gartner CFO Symposium US", "territory": "US", "fy": null, "fyQtr": null, "status": "REMOVE", "budgetEUR": null, "budgetLocal": null, "budgetLocalCurrency": null, "opps": null, "note": null, "removed": true}, {"channel": "Conferences", "item": "05-Gartner CFO Symposium UK", "territory": "US", "fy": null, "fyQtr": null, "status": "REMOVE", "budgetEUR": null, "budgetLocal": null, "budgetLocalCurrency": null, "opps": null, "note": null, "removed": true}, {"channel": "Conferences", "item": "05-SSOW Europe Libson 2027", "territory": "EU-France", "fy": "FY28", "fyQtr": "FY28-Q2", "status": "Same", "budgetEUR": 23342.0, "budgetLocal": 19950.0, "budgetLocalCurrency": "\u00a3", "opps": 4.0, "note": "Last yr price", "removed": false}, {"channel": "Conferences", "item": "06-CFO Select Mtgs Atlanta 2027", "territory": "US", "fy": "FY28", "fyQtr": "FY28-Q2", "status": "Same", "budgetEUR": 22800.0, "budgetLocal": 30000.0, "budgetLocalCurrency": "$", "opps": 2.0, "note": "Last yr price", "removed": false}, {"channel": "Conferences", "item": "07-ABSL Forum DACH 2027.", "territory": "Other", "fy": "FY28", "fyQtr": "FY28-Q2", "status": "Same", "budgetEUR": 5000.0, "budgetLocal": 5000.0, "budgetLocalCurrency": "\u20ac", "opps": 2.0, "note": "Last yr price", "removed": false}, {"channel": "Conferences", "item": "09-SSOW San Diego 2027", "territory": "US", "fy": "FY28", "fyQtr": "FY28-Q2", "status": "New", "budgetEUR": 22800.0, "budgetLocal": 30000.0, "budgetLocalCurrency": "$", "opps": 2.0, "note": "Estimated price", "removed": false}, {"channel": "Conferences", "item": "09-GBS Select Mtgs San Diego 2027", "territory": "US", "fy": "FY28", "fyQtr": "FY28-Q3", "status": "Same", "budgetEUR": 22800.0, "budgetLocal": 30000.0, "budgetLocalCurrency": "$", "opps": 2.0, "note": "Last yr price", "removed": false}, {"channel": "Conferences", "item": "09-Accounting Summit DE 2027", "territory": "Other", "fy": "FY28", "fyQtr": "FY28-Q3", "status": "Same", "budgetEUR": 15000.0, "budgetLocal": 15000.0, "budgetLocalCurrency": "\u20ac", "opps": 3.0, "note": "Last yr price", "removed": false}, {"channel": "Conferences", "item": "10-SSOW Autumn Amsterdam 2027", "territory": "EU-Nordics", "fy": "FY28", "fyQtr": "FY28-Q3", "status": "New", "budgetEUR": 28000.0, "budgetLocal": 28000.0, "budgetLocalCurrency": "\u20ac", "opps": 3.0, "note": "Estimated price", "removed": false}, {"channel": "Conferences", "item": "10-CFO Exchange Amsterdam Mtgs 2027", "territory": "EU-Nordics", "fy": "FY28", "fyQtr": "FY28-Q3", "status": "New", "budgetEUR": 28000.0, "budgetLocal": 28000.0, "budgetLocalCurrency": "\u20ac", "opps": 3.0, "note": "Estimated price", "removed": false}, {"channel": "Conferences", "item": "10-SSOW LATAM Mexico City 2027", "territory": "US", "fy": "FY28", "fyQtr": "FY28-Q3", "status": "New", "budgetEUR": 13300.0, "budgetLocal": 17500.0, "budgetLocalCurrency": "$", "opps": 2.0, "note": "Quoted price this year", "removed": false}, {"channel": "Conferences", "item": "11-CFO Select Mtgs 2027 Miami 2027", "territory": "US", "fy": "FY28", "fyQtr": "FY28-Q4", "status": "Same", "budgetEUR": 22800.0, "budgetLocal": 30000.0, "budgetLocalCurrency": "$", "opps": 2.0, "note": "Last yr price", "removed": false}, {"channel": "Conferences", "item": "11-SSOW Berlin 2027", "territory": "Other", "fy": "FY28", "fyQtr": "FY28-Q4", "status": "Same", "budgetEUR": 32000.0, "budgetLocal": 32000.0, "budgetLocalCurrency": "\u20ac", "opps": 4.0, "note": "Last yr price", "removed": false}, {"channel": "Conferences", "item": "11-Austria CFO Day 2027", "territory": "EU-SWIAUS", "fy": "FY28", "fyQtr": "FY28-Q4", "status": "New", "budgetEUR": 15000.0, "budgetLocal": 15000.0, "budgetLocalCurrency": "\u20ac", "opps": 1.0, "note": "What was price?", "removed": false}, {"channel": "User events (ASUG)", "item": "Events for 2026 Q3 (x1)", "territory": "US", "fy": "FY27", "fyQtr": null, "status": "New", "budgetEUR": 1520.0, "budgetLocal": 2000.0, "budgetLocalCurrency": "$", "opps": 0.5, "note": "Estimate", "removed": false}, {"channel": "User events (ASUG)", "item": "Events for 2026 Q4 (x2)", "territory": "US", "fy": "FY27", "fyQtr": null, "status": "New", "budgetEUR": 3040.0, "budgetLocal": 4000.0, "budgetLocalCurrency": "$", "opps": 1.0, "note": "Estimate", "removed": false}, {"channel": "Co-marketing events", "item": "09-MasterClass Acctg Summit - 2 partners", "territory": "Other", "fy": "FY28", "fyQtr": "FY28-Q3", "status": "Same", "budgetEUR": 7200.0, "budgetLocal": 7200.0, "budgetLocalCurrency": "\u20ac", "opps": 1.0, "note": null, "removed": false}, {"channel": "Co-marketing events", "item": "Partner Roundtables US Q1", "territory": "US", "fy": "FY28", "fyQtr": "FY28-Q1", "status": "New", "budgetEUR": 2280.0, "budgetLocal": 3000.0, "budgetLocalCurrency": "$", "opps": 1.0, "note": null, "removed": false}, {"channel": "Co-marketing events", "item": "Partner Roundtables US Q2", "territory": "US", "fy": "FY28", "fyQtr": "FY28-Q2", "status": "New", "budgetEUR": 2280.0, "budgetLocal": 3000.0, "budgetLocalCurrency": "$", "opps": 1.0, "note": null, "removed": false}, {"channel": "Co-marketing events", "item": "Partner Roundtables US Q3", "territory": "US", "fy": "FY28", "fyQtr": "FY28-Q3", "status": "New", "budgetEUR": 2280.0, "budgetLocal": 3000.0, "budgetLocalCurrency": "$", "opps": 1.0, "note": null, "removed": false}, {"channel": "Co-marketing events", "item": "Partner Roundtables EU-South Q1", "territory": "EU-France", "fy": "FY28", "fyQtr": "FY28-Q1", "status": "New", "budgetEUR": 3000.0, "budgetLocal": 3000.0, "budgetLocalCurrency": "\u20ac", "opps": 1.0, "note": null, "removed": false}, {"channel": "Co-marketing events", "item": "Partner Roundtables EU-South Q2", "territory": "EU-France", "fy": "FY28", "fyQtr": "FY28-Q2", "status": "New", "budgetEUR": 3000.0, "budgetLocal": 3000.0, "budgetLocalCurrency": "\u20ac", "opps": 1.0, "note": null, "removed": false}, {"channel": "Co-marketing events", "item": "Partner Roundtables EU-South Q3", "territory": "EU-France", "fy": "FY28", "fyQtr": "FY28-Q3", "status": "New", "budgetEUR": 3000.0, "budgetLocal": 3000.0, "budgetLocalCurrency": "\u20ac", "opps": 1.0, "note": null, "removed": false}, {"channel": "Co-marketing events", "item": "Partner Roundtables EU-UK Q1", "territory": "EU-UK", "fy": "FY28", "fyQtr": "FY28-Q1", "status": "New", "budgetEUR": 3000.0, "budgetLocal": 3000.0, "budgetLocalCurrency": "\u20ac", "opps": 1.0, "note": null, "removed": false}, {"channel": "Co-marketing events", "item": "Partner Roundtables EU-UK Q2", "territory": "EU-UK", "fy": "FY28", "fyQtr": "FY28-Q2", "status": "New", "budgetEUR": 3000.0, "budgetLocal": 3000.0, "budgetLocalCurrency": "\u20ac", "opps": 1.0, "note": null, "removed": false}, {"channel": "Co-marketing events", "item": "Partner Roundtables EU-UK Q3", "territory": "EU-UK", "fy": "FY28", "fyQtr": "FY28-Q3", "status": "New", "budgetEUR": 3000.0, "budgetLocal": 3000.0, "budgetLocalCurrency": "\u20ac", "opps": 1.0, "note": null, "removed": false}, {"channel": "Co-marketing events", "item": "Partner Roundtables EU-Central Q1", "territory": "EU-SWIAUS", "fy": "FY28", "fyQtr": "FY28-Q1", "status": "New", "budgetEUR": 3000.0, "budgetLocal": 3000.0, "budgetLocalCurrency": "\u20ac", "opps": 1.0, "note": null, "removed": false}, {"channel": "Co-marketing events", "item": "Partner Roundtables EU-Central Q2", "territory": "EU-SWIAUS", "fy": "FY28", "fyQtr": "FY28-Q2", "status": "New", "budgetEUR": 3000.0, "budgetLocal": 3000.0, "budgetLocalCurrency": "\u20ac", "opps": 1.0, "note": null, "removed": false}, {"channel": "Co-marketing events", "item": "Partner Roundtables EU-Central Q3", "territory": "EU-SWIAUS", "fy": "FY28", "fyQtr": "FY28-Q3", "status": "New", "budgetEUR": 3000.0, "budgetLocal": 3000.0, "budgetLocalCurrency": "\u20ac", "opps": 1.0, "note": null, "removed": false}, {"channel": "Co-marketing events", "item": "Partner Roundtables EU-Nordics Q1", "territory": "EU-Nordics", "fy": "FY28", "fyQtr": "FY28-Q1", "status": "New", "budgetEUR": 3000.0, "budgetLocal": 3000.0, "budgetLocalCurrency": "\u20ac", "opps": 1.0, "note": null, "removed": false}, {"channel": "Co-marketing events", "item": "Partner Roundtables EU-Nordics Q2", "territory": "EU-Nordics", "fy": "FY28", "fyQtr": "FY28-Q2", "status": "New", "budgetEUR": 3000.0, "budgetLocal": 3000.0, "budgetLocalCurrency": "\u20ac", "opps": 1.0, "note": null, "removed": false}, {"channel": "Co-marketing events", "item": "Partner Roundtables EU-Nordics Q3", "territory": "EU-Nordics", "fy": "FY28", "fyQtr": "FY28-Q3", "status": "New", "budgetEUR": 3000.0, "budgetLocal": 3000.0, "budgetLocalCurrency": "\u20ac", "opps": 1.0, "note": null, "removed": false}, {"channel": "Co-marketing events", "item": "Partner Roundtables EU-DE1 Q1", "territory": "EU-DE1", "fy": "FY28", "fyQtr": "FY28-Q1", "status": "New", "budgetEUR": 3000.0, "budgetLocal": 3000.0, "budgetLocalCurrency": "\u20ac", "opps": 1.0, "note": null, "removed": false}, {"channel": "Co-marketing events", "item": "Partner Roundtables EU-DE1 Q2", "territory": "EU-DE1", "fy": "FY28", "fyQtr": "FY28-Q2", "status": "New", "budgetEUR": 3000.0, "budgetLocal": 3000.0, "budgetLocalCurrency": "\u20ac", "opps": 1.0, "note": null, "removed": false}, {"channel": "Co-marketing events", "item": "Partner Roundtables EU-DE1 Q3", "territory": "EU-DE1", "fy": "FY28", "fyQtr": "FY28-Q3", "status": "New", "budgetEUR": 3000.0, "budgetLocal": 3000.0, "budgetLocalCurrency": "\u20ac", "opps": 1.0, "note": null, "removed": false}, {"channel": "Co-marketing events", "item": "Partner Roundtables EU-DE2 Q1", "territory": "EU-DE2", "fy": "FY28", "fyQtr": "FY28-Q1", "status": "New", "budgetEUR": 3000.0, "budgetLocal": 3000.0, "budgetLocalCurrency": "\u20ac", "opps": 1.0, "note": null, "removed": false}, {"channel": "Co-marketing events", "item": "Partner Roundtables EU-DE2 Q2", "territory": "EU-DE2", "fy": "FY28", "fyQtr": "FY28-Q2", "status": "New", "budgetEUR": 3000.0, "budgetLocal": 3000.0, "budgetLocalCurrency": "\u20ac", "opps": 1.0, "note": null, "removed": false}, {"channel": "Co-marketing events", "item": "Partner Roundtables EU-DE2 Q3", "territory": "EU-DE2", "fy": "FY28", "fyQtr": "FY28-Q3", "status": "New", "budgetEUR": 3000.0, "budgetLocal": 3000.0, "budgetLocalCurrency": "\u20ac", "opps": 1.0, "note": null, "removed": false}, {"channel": "Co-marketing events", "item": "Other Partner event (conf) Q1", "territory": "Other", "fy": "FY28", "fyQtr": null, "status": "New", "budgetEUR": null, "budgetLocal": null, "budgetLocalCurrency": null, "opps": null, "note": null, "removed": false}, {"channel": "Co-marketing events", "item": "Other Partner event (conf) Q2", "territory": "Other", "fy": "FY28", "fyQtr": null, "status": "New", "budgetEUR": null, "budgetLocal": null, "budgetLocalCurrency": null, "opps": null, "note": null, "removed": false}, {"channel": "Co-marketing events", "item": "Other Partner event (conf) Q3", "territory": "Other", "fy": "FY28", "fyQtr": null, "status": "New", "budgetEUR": null, "budgetLocal": null, "budgetLocalCurrency": null, "opps": null, "note": null, "removed": false}, {"channel": "Online events", "item": "Webinar series SSON X2 (12.5K ea) - Oct US", "territory": "US", "fy": "FY27", "fyQtr": "FY27-Q3", "status": "New", "budgetEUR": 9500.0, "budgetLocal": 12500.0, "budgetLocalCurrency": "$", "opps": 1.0, "note": null, "removed": false}, {"channel": "Online events", "item": "Webinar series SSON X2 (12.5K ea) - Dec EU South", "territory": "EU-France", "fy": "FY27", "fyQtr": "FY27-Q4", "status": null, "budgetEUR": 9500.0, "budgetLocal": 12500.0, "budgetLocalCurrency": "$", "opps": 1.0, "note": null, "removed": false}, {"channel": "Online events", "item": "Webinar series SSON (12.5K ea) US Q1", "territory": "US", "fy": "FY28", "fyQtr": "FY28-Q1", "status": "Same", "budgetEUR": 9500.0, "budgetLocal": 12500.0, "budgetLocalCurrency": "$", "opps": 1.0, "note": null, "removed": false}, {"channel": "Online events", "item": "Webinar series SSON (12.5K ea) DE Q1", "territory": "Other", "fy": "FY28", "fyQtr": "FY28-Q1", "status": "Same", "budgetEUR": 9500.0, "budgetLocal": 12500.0, "budgetLocalCurrency": "$", "opps": 1.0, "note": null, "removed": false}, {"channel": "Online events", "item": "Webinar series SSON (12.5K ea) Nordics Q2", "territory": "EU-Nordics", "fy": "FY28", "fyQtr": "FY28-Q2", "status": "Same", "budgetEUR": 9500.0, "budgetLocal": 12500.0, "budgetLocalCurrency": "$", "opps": 1.0, "note": null, "removed": false}, {"channel": "Online events", "item": "Webinar series SSON (12.5K ea) Central Q2", "territory": "EU-SWIAUS", "fy": "FY28", "fyQtr": "FY28-Q2", "status": "Same", "budgetEUR": 9500.0, "budgetLocal": 12500.0, "budgetLocalCurrency": "$", "opps": 1.0, "note": null, "removed": false}, {"channel": "Online events", "item": "Webinar series SSON (12.5K ea) US Q3", "territory": "US", "fy": "FY28", "fyQtr": "FY28-Q3", "status": "Same", "budgetEUR": 9500.0, "budgetLocal": 12500.0, "budgetLocalCurrency": "$", "opps": 1.0, "note": null, "removed": false}, {"channel": "Analyst", "item": "Gartner", "territory": null, "fy": "FY28", "fyQtr": null, "status": "Same", "budgetEUR": 129000.0, "budgetLocal": 129000.0, "budgetLocalCurrency": "\u20ac", "opps": null, "note": null, "removed": false}, {"channel": "Digital", "item": "ABX US Q1", "territory": "US", "fy": "FY28", "fyQtr": "FY28-Q1", "status": "New", "budgetEUR": 3800.0, "budgetLocal": 5000.0, "budgetLocalCurrency": "$", "opps": 1.0, "note": null, "removed": false}, {"channel": "Digital", "item": "ABX US Q2", "territory": "US", "fy": "FY28", "fyQtr": "FY28-Q2", "status": "New", "budgetEUR": 3800.0, "budgetLocal": 5000.0, "budgetLocalCurrency": "$", "opps": 1.0, "note": null, "removed": false}, {"channel": "Digital", "item": "ABX US Q3", "territory": "US", "fy": "FY28", "fyQtr": "FY28-Q3", "status": "New", "budgetEUR": 3800.0, "budgetLocal": 5000.0, "budgetLocalCurrency": "$", "opps": 1.0, "note": null, "removed": false}, {"channel": "Digital", "item": "ABX EU-South Q1", "territory": "EU-France", "fy": "FY28", "fyQtr": "FY28-Q1", "status": "New", "budgetEUR": 5000.0, "budgetLocal": 5000.0, "budgetLocalCurrency": "\u20ac", "opps": 1.0, "note": null, "removed": false}, {"channel": "Digital", "item": "ABX EU-South Q2", "territory": "EU-France", "fy": "FY28", "fyQtr": "FY28-Q2", "status": "New", "budgetEUR": 5000.0, "budgetLocal": 5000.0, "budgetLocalCurrency": "\u20ac", "opps": 1.0, "note": null, "removed": false}, {"channel": "Digital", "item": "ABX EU-South Q3", "territory": "EU-France", "fy": "FY28", "fyQtr": "FY28-Q3", "status": "New", "budgetEUR": 5000.0, "budgetLocal": 5000.0, "budgetLocalCurrency": "\u20ac", "opps": 1.0, "note": null, "removed": false}, {"channel": "Digital", "item": "ABX EU-UK Q1", "territory": "EU-UK", "fy": "FY28", "fyQtr": "FY28-Q1", "status": "New", "budgetEUR": 5000.0, "budgetLocal": 5000.0, "budgetLocalCurrency": "\u20ac", "opps": 1.0, "note": null, "removed": false}, {"channel": "Digital", "item": "ABX EU-UK Q2", "territory": "EU-UK", "fy": "FY28", "fyQtr": "FY28-Q2", "status": "New", "budgetEUR": 5000.0, "budgetLocal": 5000.0, "budgetLocalCurrency": "\u20ac", "opps": 1.0, "note": null, "removed": false}, {"channel": "Digital", "item": "ABX EU-UK Q3", "territory": "EU-UK", "fy": "FY28", "fyQtr": "FY28-Q3", "status": "New", "budgetEUR": 5000.0, "budgetLocal": 5000.0, "budgetLocalCurrency": "\u20ac", "opps": 1.0, "note": null, "removed": false}, {"channel": "Digital", "item": "ABX EU-Central Q1", "territory": "EU-SWIAUS", "fy": "FY28", "fyQtr": "FY28-Q1", "status": "New", "budgetEUR": 5000.0, "budgetLocal": 5000.0, "budgetLocalCurrency": "\u20ac", "opps": 1.0, "note": null, "removed": false}, {"channel": "Digital", "item": "ABX EU-Central Q2", "territory": "EU-SWIAUS", "fy": "FY28", "fyQtr": "FY28-Q2", "status": "New", "budgetEUR": 5000.0, "budgetLocal": 5000.0, "budgetLocalCurrency": "\u20ac", "opps": 1.0, "note": null, "removed": false}, {"channel": "Digital", "item": "ABX EU-Central Q3", "territory": "EU-SWIAUS", "fy": "FY28", "fyQtr": "FY28-Q3", "status": "New", "budgetEUR": 5000.0, "budgetLocal": 5000.0, "budgetLocalCurrency": "\u20ac", "opps": 1.0, "note": null, "removed": false}, {"channel": "Digital", "item": "ABX EU-Nordics Q1", "territory": "EU-Nordics", "fy": "FY28", "fyQtr": "FY28-Q1", "status": "New", "budgetEUR": 5000.0, "budgetLocal": 5000.0, "budgetLocalCurrency": "\u20ac", "opps": 1.0, "note": null, "removed": false}, {"channel": "Digital", "item": "ABX EU-Nordics Q2", "territory": "EU-Nordics", "fy": "FY28", "fyQtr": "FY28-Q2", "status": "New", "budgetEUR": 5000.0, "budgetLocal": 5000.0, "budgetLocalCurrency": "\u20ac", "opps": 1.0, "note": null, "removed": false}, {"channel": "Digital", "item": "ABX EU-Nordics Q3", "territory": "EU-Nordics", "fy": "FY28", "fyQtr": "FY28-Q3", "status": "New", "budgetEUR": 5000.0, "budgetLocal": 5000.0, "budgetLocalCurrency": "\u20ac", "opps": 1.0, "note": null, "removed": false}, {"channel": "Digital", "item": "ABX EU-DE1 Q1", "territory": "EU-DE1", "fy": "FY28", "fyQtr": "FY28-Q1", "status": "New", "budgetEUR": 5000.0, "budgetLocal": 5000.0, "budgetLocalCurrency": "\u20ac", "opps": 1.0, "note": null, "removed": false}, {"channel": "Digital", "item": "ABX EU-DE1 Q2", "territory": "EU-DE1", "fy": "FY28", "fyQtr": "FY28-Q2", "status": "New", "budgetEUR": 5000.0, "budgetLocal": 5000.0, "budgetLocalCurrency": "\u20ac", "opps": 1.0, "note": null, "removed": false}, {"channel": "Digital", "item": "ABX EU-DE1 Q3", "territory": "EU-DE1", "fy": "FY28", "fyQtr": "FY28-Q3", "status": "New", "budgetEUR": 5000.0, "budgetLocal": 5000.0, "budgetLocalCurrency": "\u20ac", "opps": 1.0, "note": null, "removed": false}, {"channel": "Digital", "item": "ABX EU-DE2 Q1", "territory": "EU-DE2", "fy": "FY28", "fyQtr": "FY28-Q1", "status": "New", "budgetEUR": 5000.0, "budgetLocal": 5000.0, "budgetLocalCurrency": "\u20ac", "opps": 1.0, "note": null, "removed": false}, {"channel": "Digital", "item": "ABX EU-DE2 Q2", "territory": "EU-DE2", "fy": "FY28", "fyQtr": "FY28-Q2", "status": "New", "budgetEUR": 5000.0, "budgetLocal": 5000.0, "budgetLocalCurrency": "\u20ac", "opps": 1.0, "note": null, "removed": false}, {"channel": "Digital", "item": "ABX EU-DE2 Q3", "territory": "EU-DE2", "fy": "FY28", "fyQtr": "FY28-Q3", "status": "New", "budgetEUR": 5000.0, "budgetLocal": 5000.0, "budgetLocalCurrency": "\u20ac", "opps": 1.0, "note": null, "removed": false}, {"channel": "Organic", "item": "Organic Search - DE1 - Q1", "territory": "EU-DE1", "fy": "FY28", "fyQtr": "FY28-Q1", "status": null, "budgetEUR": null, "budgetLocal": null, "budgetLocalCurrency": null, "opps": 1.0, "note": null, "removed": false}, {"channel": "Organic", "item": "Organic Search - DE1 - Q2", "territory": "EU-DE1", "fy": "FY28", "fyQtr": "FY28-Q2", "status": null, "budgetEUR": null, "budgetLocal": null, "budgetLocalCurrency": null, "opps": 1.0, "note": null, "removed": false}, {"channel": "Organic", "item": "Organic Search - DE1 - Q3", "territory": "EU-DE1", "fy": "FY28", "fyQtr": "FY28-Q3", "status": null, "budgetEUR": null, "budgetLocal": null, "budgetLocalCurrency": null, "opps": 1.0, "note": null, "removed": false}, {"channel": "Organic", "item": "Organic Search - DE1 - Q4", "territory": "EU-DE1", "fy": "FY28", "fyQtr": "FY28-Q4", "status": null, "budgetEUR": null, "budgetLocal": null, "budgetLocalCurrency": null, "opps": 1.0, "note": null, "removed": false}, {"channel": "Organic", "item": "Organic Search - DE2 - Q1", "territory": "EU-DE2", "fy": "FY28", "fyQtr": "FY28-Q1", "status": null, "budgetEUR": null, "budgetLocal": null, "budgetLocalCurrency": null, "opps": 1.0, "note": null, "removed": false}, {"channel": "Organic", "item": "Organic Search - DE2 - Q2", "territory": "EU-DE2", "fy": "FY28", "fyQtr": "FY28-Q2", "status": null, "budgetEUR": null, "budgetLocal": null, "budgetLocalCurrency": null, "opps": 1.0, "note": null, "removed": false}, {"channel": "Organic", "item": "Organic Search - DE2 - Q3", "territory": "EU-DE2", "fy": "FY28", "fyQtr": "FY28-Q3", "status": null, "budgetEUR": null, "budgetLocal": null, "budgetLocalCurrency": null, "opps": 1.0, "note": null, "removed": false}, {"channel": "Organic", "item": "Organic Search - DE2 - Q4", "territory": "EU-DE2", "fy": "FY28", "fyQtr": "FY28-Q4", "status": null, "budgetEUR": null, "budgetLocal": null, "budgetLocalCurrency": null, "opps": 1.0, "note": null, "removed": false}, {"channel": "Organic", "item": "Organic Search - SWIAUS - Q1", "territory": "EU-SWIAUS", "fy": "FY28", "fyQtr": "FY28-Q1", "status": null, "budgetEUR": null, "budgetLocal": null, "budgetLocalCurrency": null, "opps": 1.0, "note": null, "removed": false}, {"channel": "Organic", "item": "Organic Search - SWIAUS - Q2", "territory": "EU-SWIAUS", "fy": "FY28", "fyQtr": "FY28-Q2", "status": null, "budgetEUR": null, "budgetLocal": null, "budgetLocalCurrency": null, "opps": 1.0, "note": null, "removed": false}, {"channel": "Organic", "item": "Organic Search - SWIAUS - Q3", "territory": "EU-SWIAUS", "fy": "FY28", "fyQtr": "FY28-Q3", "status": null, "budgetEUR": null, "budgetLocal": null, "budgetLocalCurrency": null, "opps": 1.0, "note": null, "removed": false}, {"channel": "Organic", "item": "Organic Search - SWIAUS - Q4", "territory": "EU-SWIAUS", "fy": "FY28", "fyQtr": "FY28-Q4", "status": null, "budgetEUR": null, "budgetLocal": null, "budgetLocalCurrency": null, "opps": 1.0, "note": null, "removed": false}, {"channel": "AI search", "item": "AI Search vendor Remainder of FY27", "territory": "US", "fy": "FY27", "fyQtr": "FY27-Q4", "status": "New", "budgetEUR": 21280.0, "budgetLocal": 28000.0, "budgetLocalCurrency": "$", "opps": 1.0, "note": null, "removed": false}, {"channel": "AI search", "item": "AI Search vendor FY28 Q1", "territory": "US", "fy": "FY28", "fyQtr": "FY28-Q1", "status": "New", "budgetEUR": 15200.0, "budgetLocal": 20000.0, "budgetLocalCurrency": "$", "opps": 1.0, "note": null, "removed": false}, {"channel": "AI search", "item": "AI Search vendor FY28 Q2", "territory": "US", "fy": "FY28", "fyQtr": "FY28-Q2", "status": "New", "budgetEUR": 15200.0, "budgetLocal": 20000.0, "budgetLocalCurrency": "$", "opps": 1.0, "note": null, "removed": false}]};const TERR_COLOR_VAR = {
+  'US': '--terr-US', 'EU-France': '--terr-EU-France', 'EU-UK': '--terr-EU-UK',
+  'EU-SWIAUS': '--terr-EU-SWIAUS', 'EU-Nordics': '--terr-EU-Nordics',
+  'EU-DE1': '--terr-EU-DE1', 'EU-DE2': '--terr-EU-DE2', 'Other': '--terr-Other'
+};
+
+const fmtEUR = v => '€' + Math.round(v).toLocaleString('en-US');
+const fmtEURk = v => '€' + (v/1000).toLocaleString('en-US', {maximumFractionDigits: v % 1000 === 0 ? 0 : 1}) + 'k';
+const fmtNum = v => (v % 1 === 0 ? v : v.toFixed(1)).toString();
+
+// ---------- live data pipeline ----------
+const SHEET_ID = '1uYimlEb3AbTUQ_Mev2is1z_EaOqiOtwK8GFdDyk1AmQ';
+const SHEET_GID = '436189910';
+const SHEET_CSV_URL = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:csv&gid=${SHEET_GID}`;
+const SHEET_EDIT_URL = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/edit?gid=${SHEET_GID}#gid=${SHEET_GID}`;
+
+const QUARTERS = ["FY27-Q2", "FY27-Q3", "FY27-Q4", "FY28-Q1", "FY28-Q2", "FY28-Q3", "FY28-Q4"];
+const TERRITORIES = ["US", "EU-France", "EU-UK", "EU-SWIAUS", "EU-Nordics", "EU-DE1", "EU-DE2", "Other"];
+
+const REGION_MAP = {
+  'us': 'US',
+  'eu-france': 'EU-France', 'eu-south': 'EU-France',
+  'eu-uk': 'EU-UK',
+  'eu-swiaus': 'EU-SWIAUS', 'eu-central': 'EU-SWIAUS',
+  'eu-nordics': 'EU-Nordics',
+  'eu-de1': 'EU-DE1', 'de1': 'EU-DE1',
+  'eu-de2': 'EU-DE2', 'de2': 'EU-DE2',
+  'other': 'Other',
+};
+// Item-name tokens checked FIRST, since region codes in the sheet occasionally drift/typo
+// (e.g. a row shift produces "EU-DE3"/"EU-DE4") — the item name is the more reliable signal.
+const ITEM_TOKEN_ORDER = [
+  ['EU-DE1', 'EU-DE1'], ['EU-DE2', 'EU-DE2'],
+  ['EU-UK', 'EU-UK'], ['EU-Nordics', 'EU-Nordics'],
+  ['EU-France', 'EU-France'], ['EU-South', 'EU-France'],
+  ['EU-SWIAUS', 'EU-SWIAUS'], ['EU-Central', 'EU-SWIAUS'],
+];
+
+function regionTerritory(regionRaw) {
+  const tokens = (regionRaw || '').split(',').map(t => t.trim().toLowerCase());
+  const mapped = new Set();
+  for (const t of tokens) { if (REGION_MAP[t]) mapped.add(REGION_MAP[t]); }
+  if (mapped.size === 1) return [...mapped][0];
+  if (mapped.size > 1) return 'Other';
+  return null;
+}
+function normTerritory(regionRaw, itemName) {
+  for (const [token, terr] of ITEM_TOKEN_ORDER) {
+    if (itemName.includes(token)) return terr;
+  }
+  return regionTerritory(regionRaw);
+}
+function parseMoney(s) {
+  if (s == null) return null;
+  s = String(s).trim();
+  if (s === '' || s === '-') return null;
+  s = s.replace(/[€$£,]/g, '').trim();
+  if (s === '') return null;
+  const n = parseFloat(s);
+  return Number.isNaN(n) ? null : n;
+}
+function cleanNum(v) {
+  const r = Math.round(v * 10000) / 10000;
+  return Number.isInteger(r) ? r : r;
+}
+// "Budget in Local" is a mixed-currency column (US items in $, most EU items in €, the
+// occasional row in £) — each item's own local-currency figure, not a summable series.
+// Kept per line item for display only; every aggregate/chart total stays in € (Budget €).
+const CURRENCY_SYMBOLS = ['€', '$', '£'];
+function parseLocalMoney(s) {
+  if (s == null) return { value: null, currency: null };
+  s = String(s).trim();
+  if (s === '' || s === '-') return { value: null, currency: null };
+  const currency = CURRENCY_SYMBOLS.find(c => s.includes(c)) || null;
+  const value = parseMoney(s);
+  return { value, currency };
+}
+function fmtLocal(value, currency) {
+  if (value == null) return '—';
+  return (currency || '') + Math.round(value).toLocaleString('en-US');
+}
+
+// Quote-aware CSV parser (handles quoted fields, embedded commas, escaped "" quotes, CRLF).
+function parseCSV(text) {
+  const rows = [];
+  let row = [], field = '', inQuotes = false;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (inQuotes) {
+      if (c === '"') {
+        if (text[i + 1] === '"') { field += '"'; i++; }
+        else { inQuotes = false; }
+      } else { field += c; }
+    } else {
+      if (c === '"') { inQuotes = true; }
+      else if (c === ',') { row.push(field); field = ''; }
+      else if (c === '\r') { /* skip */ }
+      else if (c === '\n') { row.push(field); rows.push(row); row = []; field = ''; }
+      else { field += c; }
+    }
+  }
+  if (field !== '' || row.length) { row.push(field); rows.push(row); }
+  return rows.filter(r => r.length > 1 || (r.length === 1 && r[0] !== ''));
+}
+
+// Build the DATA object (same shape as before) from parsed sheet rows.
+// Header row: Link, Item, Budget FY, Same as last year?, Theater, Regions, Budget in Local, Budget €, Note, FY-QTR, Opps
+// A row is a channel-section header iff Theater, Regions, Budget FY, and Status are ALL blank but Item is not
+// (this is what lets a new channel section be picked up automatically, while not misclassifying a leaf
+// row like "Gartner" — which has blank Theater/Regions but a non-blank Status — as a spurious header).
+function buildDataFromRows(rows) {
+  if (!rows.length) throw new Error('empty sheet');
+  const header = rows[0].map(h => h.trim().toLowerCase());
+  const idx = (pred) => header.findIndex(pred);
+  const iItem = idx(h => h === 'item');
+  const iBudgetFY = idx(h => h === 'budget fy');
+  const iStatus = idx(h => h.startsWith('same as last year'));
+  const iTheater = idx(h => h === 'theater');
+  const iRegions = idx(h => h === 'regions');
+  const iBudgetEUR = idx(h => h.includes('€'));
+  const iBudgetLocal = idx(h => h === 'budget in local');
+  const iNote = idx(h => h === 'note');
+  const iFyQtr = idx(h => h.includes('qtr'));
+  const iOpps = idx(h => h === 'opps');
+  if ([iItem, iTheater, iRegions, iBudgetEUR, iFyQtr, iOpps].some(i => i === -1)) {
+    throw new Error('unrecognized sheet columns');
+  }
+
+  const lineItems = [];
+  const channelOrder = [];
+  let currentChannel = null;
+  for (let r = 1; r < rows.length; r++) {
+    const row = rows[r];
+    const get = (i) => (i >= 0 && row[i] != null) ? row[i].trim() : '';
+    const item = get(iItem);
+    const theater = get(iTheater);
+    const regions = get(iRegions);
+    const budgetFY = get(iBudgetFY);
+    const status = get(iStatus);
+    const allBlankExceptItem = theater === '' && regions === '' && budgetFY === '' && status === '';
+    if (item === '' && allBlankExceptItem) continue; // blank row or grand-total row
+    if (allBlankExceptItem) { // channel section header
+      currentChannel = item;
+      if (!channelOrder.includes(item)) channelOrder.push(item);
+      continue;
+    }
+    if (item === '') continue;
+    const territory = normTerritory(regions, item);
+    const budgetEUR = parseMoney(get(iBudgetEUR));
+    const { value: budgetLocal, currency: budgetLocalCurrency } = parseLocalMoney(get(iBudgetLocal));
+    const opps = parseMoney(get(iOpps));
+    const removed = status.toUpperCase() === 'REMOVE';
+    const fyQtr = get(iFyQtr) || null;
+    const note = get(iNote) || null;
+    if (territory === null && budgetEUR === null && opps === null && fyQtr === null) continue; // placeholder row
+    const fy = deriveFY(fyQtr, budgetFY);
+    lineItems.push({ channel: currentChannel, item, territory, fy, fyQtr, status: status || null, budgetEUR, budgetLocal, budgetLocalCurrency, opps, note, removed });
+  }
+
+  return {
+    quarters: QUARTERS, territories: TERRITORIES,
+    ...aggregate(lineItems, QUARTERS, TERRITORIES),
+    channel_order: channelOrder,
+    line_items: lineItems,
+  };
+}
+
+// Which fiscal year a line item belongs to. Prefer the concrete FY-QTR (it's
+// unambiguous); fall back to the sheet's "Budget FY" column (e.g. "Additional FY27",
+// "FY28") for items with no quarter yet assigned (untagged spend, TBD placeholders).
+function deriveFY(fyQtr, budgetFY) {
+  if (fyQtr) return fyQtr.split('-')[0];
+  const m = /FY(27|28)/i.exec(budgetFY || '');
+  return m ? 'FY' + m[1] : null;
+}
+
+// Core aggregation, reusable for both the full dataset and any filtered slice of it
+// (a subset of line items, restricted to a given quarter axis and territory set).
+function aggregate(items, quarters, territories) {
+  const active = items.filter(x => !x.removed);
+  const spendByTerrQtr = {}, oppsByTerrQtr = {};
+  for (const t of territories) { spendByTerrQtr[t] = new Array(quarters.length).fill(0); oppsByTerrQtr[t] = new Array(quarters.length).fill(0); }
+  for (const x of active) {
+    if (territories.includes(x.territory) && quarters.includes(x.fyQtr)) {
+      const qi = quarters.indexOf(x.fyQtr);
+      spendByTerrQtr[x.territory][qi] += (x.budgetEUR || 0);
+      oppsByTerrQtr[x.territory][qi] += (x.opps || 0);
+    }
+  }
+  for (const t of territories) { spendByTerrQtr[t] = spendByTerrQtr[t].map(cleanNum); oppsByTerrQtr[t] = oppsByTerrQtr[t].map(cleanNum); }
+
+  const spendTotalByTerr = {}, oppsTotalByTerr = {};
+  for (const t of territories) { spendTotalByTerr[t] = 0; oppsTotalByTerr[t] = 0; }
+  for (const x of active) {
+    if (territories.includes(x.territory)) {
+      spendTotalByTerr[x.territory] += (x.budgetEUR || 0);
+      oppsTotalByTerr[x.territory] += (x.opps || 0);
+    }
+  }
+  for (const t of territories) { spendTotalByTerr[t] = cleanNum(spendTotalByTerr[t]); oppsTotalByTerr[t] = cleanNum(oppsTotalByTerr[t]); }
+
+  const channelOppTotals = {};
+  for (const x of active) {
+    if (x.channel === 'Analyst' || !territories.includes(x.territory)) continue;
+    channelOppTotals[x.channel] = (channelOppTotals[x.channel] || 0) + (x.opps || 0);
+  }
+  const channels = Object.keys(channelOppTotals).sort((a, b) => channelOppTotals[b] - channelOppTotals[a]);
+
+  const oppsByChannelTerr = {};
+  for (const ch of channels) { oppsByChannelTerr[ch] = {}; for (const t of territories) oppsByChannelTerr[ch][t] = 0; }
+  for (const x of active) {
+    if (oppsByChannelTerr[x.channel] && territories.includes(x.territory)) {
+      oppsByChannelTerr[x.channel][x.territory] += (x.opps || 0);
+    }
+  }
+  for (const ch of channels) for (const t of territories) oppsByChannelTerr[ch][t] = cleanNum(oppsByChannelTerr[ch][t]);
+
+  const untaggedBudget = cleanNum(active.filter(x => x.territory === null).reduce((s, x) => s + (x.budgetEUR || 0), 0));
+  const totalSpendAll = cleanNum(Object.values(spendTotalByTerr).reduce((s, v) => s + v, 0) + untaggedBudget);
+  const totalOppsTagged = cleanNum(Object.values(oppsTotalByTerr).reduce((s, v) => s + v, 0));
+  const lineItemsCount = active.filter(x => x.budgetEUR !== null && (territories.includes(x.territory) || x.territory === null)).length;
+
+  return {
+    spend_by_terr_qtr: spendByTerrQtr, opps_by_terr_qtr: oppsByTerrQtr,
+    spend_total_by_terr: spendTotalByTerr, opps_total_by_terr: oppsTotalByTerr,
+    channels, opps_by_channel_terr: oppsByChannelTerr,
+    meta: { total_spend_all: totalSpendAll, untagged_budget: untaggedBudget, total_opps_tagged: totalOppsTagged, line_items: lineItemsCount },
+  };
+}
+
+function setStatus(mode, text) {
+  const dot = document.getElementById('status-dot');
+  const label = document.getElementById('status-text');
+  dot.classList.remove('live', 'fallback');
+  if (mode === 'live') dot.classList.add('live');
+  else if (mode === 'fallback') dot.classList.add('fallback');
+  label.textContent = text;
+}
+
+async function loadLiveData(isRetry) {
+  const btn = document.getElementById('refresh-btn');
+  btn.disabled = true;
+  setStatus('', isRetry ? 'Refreshing…' : 'Loading…');
+  try {
+    const resp = await fetch(SHEET_CSV_URL, { cache: 'no-store' });
+    if (!resp.ok) throw new Error('HTTP ' + resp.status);
+    const text = await resp.text();
+    const rows = parseCSV(text);
+    const built = buildDataFromRows(rows);
+    if (!built.line_items.length) throw new Error('no rows parsed');
+    DATA = built;
+    const now = new Date();
+    setStatus('live', `Live from Google Sheet · updated ${now.toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'})}`);
+  } catch (err) {
+    DATA = FALLBACK_DATA;
+    setStatus('fallback', 'Live fetch unavailable — showing last known snapshot');
+  }
+  renderSubtitle();
+  draw();
+  btn.disabled = false;
+}
+
+// ---------- subtitle / footnote ----------
+function renderSubtitle() {
+  const removedCount = DATA.line_items.filter(x => x.removed).length;
+  const untaggedItems = DATA.line_items.filter(x => !x.removed && x.territory === null && x.budgetEUR);
+  document.getElementById('subtitle-text').textContent =
+    `Draft budget items under review · ${fmtEUR(DATA.meta.total_spend_all)} total across ${DATA.meta.line_items} line items · ` +
+    `${fmtNum(DATA.meta.total_opps_tagged)} opps tagged to territory` +
+    (DATA.meta.untagged_budget ? ` (excl. ${fmtEUR(DATA.meta.untagged_budget)} untagged spend)` : '');
+  const untaggedNames = untaggedItems.map(x => x.item).join(', ');
+  document.getElementById('footnote-2').textContent = removedCount || untaggedItems.length
+    ? `Excludes ${removedCount} item${removedCount === 1 ? '' : 's'} marked REMOVE` +
+      (untaggedItems.length ? ` and untagged spend (${untaggedNames} — ${fmtEUR(DATA.meta.untagged_budget)}, no territory assigned)` : '') + '.'
+    : '';
+}
+const NS = 'http://www.w3.org/2000/svg';
+function el(tag, attrs) {
+  const e = document.createElementNS(NS, tag);
+  for (const k in attrs) e.setAttribute(k, attrs[k]);
+  return e;
+}
+// Shown when the current filter combination leaves nothing to plot.
+function renderEmptyState(svg, W, H, message) {
+  svg.innerHTML = '';
+  svg.setAttribute('viewBox', `0 0 ${W} ${H}`);
+  const t = el('text', { x: W / 2, y: H / 2, class: 'axis-label', 'text-anchor': 'middle' });
+  t.textContent = message;
+  svg.appendChild(t);
+}
+function niceMax(v) {
+  if (v <= 0) return 10;
+  const mag = Math.pow(10, Math.floor(Math.log10(v)));
+  const norm = v / mag;
+  const steps = [1, 1.2, 1.5, 2, 2.5, 3, 4, 5, 6, 8, 10];
+  const step = steps.find(s => s >= norm) || 10;
+  return step * mag;
+}
+function niceTicks(max, n) {
+  const ticks = [];
+  for (let i = 0; i <= n; i++) ticks.push(max * i / n);
+  return ticks;
+}
+
+const tooltip = document.getElementById('tooltip');
+function showTooltip(x, y, html) {
+  tooltip.innerHTML = '';
+  tooltip.appendChild(html);
+  tooltip.classList.add('show');
+  const pad = 16;
+  let left = x + pad, top = y + pad;
+  const rect = tooltip.getBoundingClientRect();
+  if (left + rect.width > window.innerWidth - 8) left = x - rect.width - pad;
+  if (top + rect.height > window.innerHeight - 8) top = y - rect.height - pad;
+  tooltip.style.left = left + 'px';
+  tooltip.style.top = top + 'px';
+}
+function hideTooltip() { tooltip.classList.remove('show'); }
+
+function ttRow(label, color, value) {
+  const row = document.createElement('div');
+  row.className = 'tt-row';
+  const key = document.createElement('div');
+  key.className = 'tt-key';
+  const sw = document.createElement('span');
+  sw.className = 'tt-swatch';
+  sw.style.background = color;
+  const lab = document.createElement('span');
+  lab.textContent = label;
+  key.appendChild(sw); key.appendChild(lab);
+  const val = document.createElement('span');
+  val.className = 'tt-val';
+  val.textContent = value;
+  row.appendChild(key); row.appendChild(val);
+  return row;
+}
+
+// =========================================================
+// Stacked bar chart (Panels A & B)
+// =========================================================
+function renderStackedChart(svgId, legendId, territories, quarters, seriesByTerr, valueFmt, axisFmt, yLabel) {
+  const svg = document.getElementById(svgId);
+  const W = 1100, H = 400;
+  const legend0 = document.getElementById(legendId);
+  if (!territories.length || !quarters.length) {
+    renderEmptyState(svg, W, H, 'No data for this filter');
+    legend0.innerHTML = '';
+    return;
+  }
+  const M = { top: 30, right: 16, bottom: 40, left: 66 };
+  const plotW = W - M.left - M.right;
+  const plotH = H - M.top - M.bottom;
+
+  svg.innerHTML = '';
+  svg.setAttribute('viewBox', `0 0 ${W} ${H}`);
+
+  const totals = quarters.map((q, qi) => territories.reduce((s, t) => s + (seriesByTerr[t][qi] || 0), 0));
+  const maxTotal = niceMax(Math.max(...totals) * 1.1);
+  const ticks = niceTicks(maxTotal, 5);
+
+  // gridlines + y ticks
+  ticks.forEach(tv => {
+    const y = M.top + plotH - (tv / maxTotal) * plotH;
+    svg.appendChild(el('line', { x1: M.left, x2: W - M.right, y1: y, y2: y, class: tv === 0 ? 'baseline-line' : 'grid-line' }));
+    const t = el('text', { x: M.left - 10, y: y + 4, class: 'tick-label axis-label', 'text-anchor': 'end' });
+    t.textContent = axisFmt(tv);
+    svg.appendChild(t);
+  });
+
+  const n = quarters.length;
+  const slot = plotW / n;
+  const barW = Math.min(64, slot * 0.6);
+
+  quarters.forEach((q, qi) => {
+    const cx = M.left + slot * qi + slot / 2;
+    const x0 = cx - barW / 2;
+    let yCursor = M.top + plotH; // baseline
+    const nonZeroTerrs = territories.filter(t => (seriesByTerr[t][qi] || 0) > 0);
+    nonZeroTerrs.forEach((t, idx) => {
+      const v = seriesByTerr[t][qi] || 0;
+      const segH = (v / maxTotal) * plotH;
+      const y = yCursor - segH;
+      const isTop = idx === nonZeroTerrs.length - 1;
+      const color = `var(${TERR_COLOR_VAR[t]})`;
+      if (isTop) {
+        const r = 4;
+        const h = Math.max(segH, r);
+        const path = `M ${x0} ${y + h} L ${x0} ${y + r} Q ${x0} ${y} ${x0 + r} ${y} L ${x0 + barW - r} ${y} Q ${x0 + barW} ${y} ${x0 + barW} ${y + r} L ${x0 + barW} ${y + h} Z`;
+        svg.appendChild(el('path', { d: path, fill: color, stroke: 'var(--surface-1)', 'stroke-width': 1.2 }));
+      } else {
+        svg.appendChild(el('rect', { x: x0, y: y, width: barW, height: Math.max(segH,0), fill: color, stroke: 'var(--surface-1)', 'stroke-width': 1.2 }));
+      }
+      yCursor = y;
+    });
+
+    // (totals[qi] is kept for the tooltip's Total row below — not drawn on the chart
+    // itself; see the table view for a persistent per-quarter and grand total.)
+
+    // x tick label
+    const xt = el('text', { x: cx, y: M.top + plotH + 22, class: 'tick-label', 'text-anchor': 'middle' });
+    xt.textContent = q;
+    svg.appendChild(xt);
+
+    // hit rect for tooltip (whole column band)
+    const hit = el('rect', { x: M.left + slot * qi, y: M.top, width: slot, height: plotH, class: 'hit-rect' });
+    svg.appendChild(hit);
+    hit.addEventListener('mousemove', (ev) => {
+      const box = document.createElement('div');
+      const title = document.createElement('div');
+      title.className = 'tt-title';
+      title.textContent = q;
+      box.appendChild(title);
+      nonZeroTerrs.slice().reverse().forEach(t => {
+        box.appendChild(ttRow(t, `var(${TERR_COLOR_VAR[t]})`, valueFmt(seriesByTerr[t][qi] || 0)));
+      });
+      const totalRow = document.createElement('div');
+      totalRow.className = 'tt-total';
+      const totLab = document.createElement('span'); totLab.textContent = 'Total';
+      const totVal = document.createElement('span'); totVal.className = 'tt-val'; totVal.textContent = valueFmt(totals[qi]);
+      totalRow.appendChild(totLab); totalRow.appendChild(totVal);
+      box.appendChild(totalRow);
+      showTooltip(ev.clientX, ev.clientY, box);
+    });
+    hit.addEventListener('mouseleave', hideTooltip);
+  });
+
+  // y axis label
+  const yl = el('text', { x: -(M.top + plotH/2), y: 16, class: 'axis-label', 'text-anchor': 'middle', transform: 'rotate(-90)' });
+  yl.textContent = yLabel;
+  svg.appendChild(yl);
+
+  // legend
+  const legend = document.getElementById(legendId);
+  legend.innerHTML = '';
+  territories.forEach(t => {
+    const total = seriesByTerr[t].reduce((a,b)=>a+b, 0);
+    if (total <= 0) return;
+    const item = document.createElement('div');
+    item.className = 'legend-item';
+    const sw = document.createElement('span');
+    sw.className = 'legend-swatch';
+    sw.style.background = `var(${TERR_COLOR_VAR[t]})`;
+    const lab = document.createElement('span');
+    lab.textContent = t;
+    item.appendChild(sw); item.appendChild(lab);
+    legend.appendChild(item);
+  });
+}
+
+// =========================================================
+// Sequential color-scale helper, shared by the channel heatmap below
+// =========================================================
+const SEQ_VARS = ['--seq-100', '--seq-250', '--seq-400', '--seq-550'];
+const SEQ_INK_VARS = ['--seq-ink-1', '--seq-ink-2', '--seq-ink-3', '--seq-ink-4'];
+
+function seqBucket(v, maxV) {
+  if (!v || v <= 0) return -1;
+  const t = v / maxV;
+  if (t <= 0.25) return 0;
+  if (t <= 0.5) return 1;
+  if (t <= 0.75) return 2;
+  return 3;
+}
+
+// =========================================================
+// Territory × quarter heatmap — alternate view for Panels A & B
+// =========================================================
+function renderQuarterHeatmap(svgId, legendId, territories, quarters, seriesByTerr, valueFmt, unitLabel) {
+  const svg = document.getElementById(svgId);
+  const W = 1100;
+  const legend0 = document.getElementById(legendId);
+  if (!territories.length || !quarters.length) {
+    renderEmptyState(svg, W, 160, 'No data for this filter');
+    legend0.innerHTML = '';
+    return;
+  }
+  const rowH = 40;
+  const M = { top: 34, right: 20, bottom: 8, left: 118 };
+  const plotH = rowH * territories.length;
+  const H = M.top + plotH + M.bottom;
+  const plotW = W - M.left - M.right;
+  const colW = plotW / quarters.length;
+
+  svg.innerHTML = '';
+  svg.setAttribute('viewBox', `0 0 ${W} ${H}`);
+
+  let maxV = 0;
+  territories.forEach(t => quarters.forEach((q, qi) => { const v = (seriesByTerr[t] && seriesByTerr[t][qi]) || 0; if (v > maxV) maxV = v; }));
+  if (maxV <= 0) maxV = 1;
+
+  // column headers (quarters)
+  quarters.forEach((q, qi) => {
+    const cx = M.left + colW * qi + colW / 2;
+    const lab = el('text', { x: cx, y: M.top - 10, class: 'tick-label', 'text-anchor': 'middle' });
+    lab.textContent = q;
+    svg.appendChild(lab);
+  });
+
+  // divider between fiscal years, if the axis spans more than one
+  const firstFY = quarters[0].split('-')[0];
+  const fyBoundary = quarters.findIndex(q => q.split('-')[0] !== firstFY);
+  if (fyBoundary > 0) {
+    const dx = M.left + colW * fyBoundary;
+    svg.appendChild(el('line', { x1: dx, x2: dx, y1: M.top - 18, y2: M.top + plotH, class: 'year-divider' }));
+  }
+
+  territories.forEach((t, ri) => {
+    const cy = M.top + rowH * ri + rowH / 2;
+    const rl = el('text', { x: M.left - 10, y: cy + 4, class: 'tick-label', 'text-anchor': 'end' });
+    rl.textContent = t;
+    svg.appendChild(rl);
+
+    quarters.forEach((q, qi) => {
+      const v = (seriesByTerr[t] && seriesByTerr[t][qi]) || 0;
+      const x0 = M.left + colW * qi + 2, y0 = M.top + rowH * ri + 2;
+      const w = colW - 4, h = rowH - 4;
+      const rect = el('rect', { x: x0, y: y0, width: w, height: h, rx: 3, ry: 3 });
+      let inkVar = null;
+      if (!v || v <= 0) {
+        rect.setAttribute('fill', 'var(--surface-1)');
+        rect.setAttribute('stroke', 'var(--grid)');
+        rect.setAttribute('stroke-width', 1);
+      } else {
+        const b = seqBucket(v, maxV);
+        rect.setAttribute('fill', `var(${SEQ_VARS[b]})`);
+        inkVar = SEQ_INK_VARS[b];
+      }
+      svg.appendChild(rect);
+      if (v > 0) {
+        const lab = el('text', { x: x0 + w / 2, y: y0 + h / 2 + 4, 'text-anchor': 'middle', class: 'heat-cell-label' });
+        lab.setAttribute('fill', `var(${inkVar})`);
+        lab.textContent = valueFmt(v);
+        svg.appendChild(lab);
+      }
+      const hit = el('rect', { x: x0, y: y0, width: w, height: h, class: 'hit-rect' });
+      svg.appendChild(hit);
+      hit.addEventListener('mousemove', (ev) => {
+        const box = document.createElement('div');
+        const title = document.createElement('div');
+        title.className = 'tt-title';
+        title.textContent = `${t} · ${q}`;
+        box.appendChild(title);
+        box.appendChild(ttRow(unitLabel, v > 0 ? `var(${SEQ_VARS[seqBucket(v, maxV)]})` : 'var(--grid)', v > 0 ? valueFmt(v) : 'None planned'));
+        showTooltip(ev.clientX, ev.clientY, box);
+      });
+      hit.addEventListener('mouseleave', hideTooltip);
+    });
+  });
+
+  // legend
+  const legend = legend0;
+  legend.innerHTML = '';
+  const t1 = Math.max(1, Math.ceil(maxV * 0.25));
+  const t2 = Math.max(t1 + 1, Math.ceil(maxV * 0.5));
+  const t3 = Math.max(t2 + 1, Math.ceil(maxV * 0.75));
+  const t4 = Math.max(t3 + 1, Math.ceil(maxV));
+  const ranges = [[0, t1], [t1, t2], [t2, t3], [t3, t4]];
+  ranges.forEach((r, i) => {
+    const item = document.createElement('div');
+    item.className = 'legend-item';
+    const sw = document.createElement('span');
+    sw.className = 'legend-seq-swatch';
+    sw.style.background = `var(${SEQ_VARS[i]})`;
+    const lab = document.createElement('span');
+    lab.textContent = `${valueFmt(r[0])}–${valueFmt(r[1])}`;
+    item.appendChild(sw); item.appendChild(lab);
+    legend.appendChild(item);
+  });
+  const hollowItem = document.createElement('div');
+  hollowItem.className = 'legend-item';
+  const hsw = document.createElement('span');
+  hsw.className = 'legend-hollow-swatch';
+  const hlab = document.createElement('span');
+  hlab.textContent = 'None planned';
+  hollowItem.appendChild(hsw); hollowItem.appendChild(hlab);
+  legend.appendChild(hollowItem);
+}
+
+// =========================================================
+// Channel × territory heatmap (Panel A3) — with margin totals
+// =========================================================
+function renderChannelHeatmap(svgId, legendId, territories, channels, matrix) {
+  const svg = document.getElementById(svgId);
+  const W = 1100;
+  const legend0 = document.getElementById(legendId);
+  if (!territories.length || !channels.length) {
+    renderEmptyState(svg, W, 160, 'No opportunities for this filter');
+    legend0.innerHTML = '';
+    return;
+  }
+  const rowH = 40;
+  const M = { top: 34, right: 20, bottom: 8, left: 118 };
+  const plotH = rowH * territories.length;
+  const H = M.top + plotH + M.bottom;
+  const plotW = W - M.left - M.right;
+  const colW = plotW / channels.length;
+
+  svg.innerHTML = '';
+  svg.setAttribute('viewBox', `0 0 ${W} ${H}`);
+
+  // color scale from body cells
+  let maxV = 0;
+  territories.forEach(t => channels.forEach(c => { const v = (matrix[c] && matrix[c][t]) || 0; if (v > maxV) maxV = v; }));
+  if (maxV <= 0) maxV = 1;
+
+  // column headers (channels) — totals live in the table view only, not on the chart
+  channels.forEach((c, ci) => {
+    const cx = M.left + colW * ci + colW / 2;
+    const lab = el('text', { x: cx, y: M.top - 10, class: 'tick-label', 'text-anchor': 'middle' });
+    lab.textContent = c;
+    svg.appendChild(lab);
+  });
+
+  function drawCell(x0, y0, w, h, v) {
+    const rect = el('rect', { x: x0, y: y0, width: w, height: h, rx: 3, ry: 3 });
+    if (!v || v <= 0) {
+      rect.setAttribute('fill', 'var(--surface-1)');
+      rect.setAttribute('stroke', 'var(--grid)');
+      rect.setAttribute('stroke-width', 1);
+    } else {
+      const b = seqBucket(v, maxV);
+      rect.setAttribute('fill', `var(${SEQ_VARS[b]})`);
+    }
+    return rect;
+  }
+
+  territories.forEach((t, ri) => {
+    const cy = M.top + rowH * ri + rowH / 2;
+    const rl = el('text', { x: M.left - 10, y: cy + 4, class: 'tick-label', 'text-anchor': 'end' });
+    rl.textContent = t;
+    svg.appendChild(rl);
+
+    channels.forEach((c, ci) => {
+      const v = (matrix[c] && matrix[c][t]) || 0;
+      const x0 = M.left + colW * ci + 2, y0 = M.top + rowH * ri + 2;
+      const w = colW - 4, h = rowH - 4;
+      svg.appendChild(drawCell(x0, y0, w, h, v));
+      if (v > 0) {
+        const b = seqBucket(v, maxV);
+        const lab = el('text', { x: x0 + w / 2, y: y0 + h / 2 + 4, 'text-anchor': 'middle', class: 'heat-cell-label' });
+        lab.setAttribute('fill', `var(${SEQ_INK_VARS[b]})`);
+        lab.textContent = fmtNum(v);
+        svg.appendChild(lab);
+      }
+      const hit = el('rect', { x: x0, y: y0, width: w, height: h, class: 'hit-rect' });
+      svg.appendChild(hit);
+      hit.addEventListener('mousemove', (ev) => {
+        const box = document.createElement('div');
+        const title = document.createElement('div');
+        title.className = 'tt-title';
+        title.textContent = `${t} · ${c}`;
+        box.appendChild(title);
+        box.appendChild(ttRow('Opps', v > 0 ? `var(${SEQ_VARS[seqBucket(v, maxV)]})` : 'var(--grid)', v > 0 ? fmtNum(v) : 'Not used here'));
+        showTooltip(ev.clientX, ev.clientY, box);
+      });
+      hit.addEventListener('mouseleave', hideTooltip);
+    });
+  });
+
+  // legend
+  const legend = document.getElementById(legendId);
+  legend.innerHTML = '';
+  const t1 = Math.max(1, Math.ceil(maxV * 0.25));
+  const t2 = Math.max(t1 + 1, Math.ceil(maxV * 0.5));
+  const t3 = Math.max(t2 + 1, Math.ceil(maxV * 0.75));
+  const t4 = Math.max(t3 + 1, Math.ceil(maxV));
+  const ranges = [[1, t1], [t1 + 1, t2], [t2 + 1, t3], [t3 + 1, t4]];
+  ranges.forEach((r, i) => {
+    const item = document.createElement('div');
+    item.className = 'legend-item';
+    const sw = document.createElement('span');
+    sw.className = 'legend-seq-swatch';
+    sw.style.background = `var(${SEQ_VARS[i]})`;
+    const lab = document.createElement('span');
+    lab.textContent = r[0] === r[1] ? `${r[0]} opp${r[0] === 1 ? '' : 's'}` : `${r[0]}–${r[1]} opps`;
+    item.appendChild(sw); item.appendChild(lab);
+    legend.appendChild(item);
+  });
+  const hollowItem = document.createElement('div');
+  hollowItem.className = 'legend-item';
+  const hsw = document.createElement('span');
+  hsw.className = 'legend-hollow-swatch';
+  const hlab = document.createElement('span');
+  hlab.textContent = 'Channel not used';
+  hollowItem.appendChild(hsw); hollowItem.appendChild(hlab);
+  legend.appendChild(hollowItem);
+}
+
+function buildChannelHeatmapTable(containerId, territories, channels, matrix) {
+  const container = document.getElementById(containerId);
+  const table = document.createElement('table');
+  table.className = 'data-table';
+  const thead = document.createElement('thead');
+  const hr = document.createElement('tr');
+  hr.appendChild(document.createElement('th'));
+  channels.forEach(c => { const th = document.createElement('th'); th.textContent = c; hr.appendChild(th); });
+  const thTotal = document.createElement('th'); thTotal.textContent = 'Total'; hr.appendChild(thTotal);
+  thead.appendChild(hr);
+  table.appendChild(thead);
+  const tbody = document.createElement('tbody');
+  const colTotals = channels.map(() => 0);
+  let grandTotal = 0;
+  territories.forEach(t => {
+    const tr = document.createElement('tr');
+    const th = document.createElement('th'); th.textContent = t; th.style.textAlign = 'left'; tr.appendChild(th);
+    let rowTotal = 0;
+    channels.forEach((c, ci) => {
+      const v = (matrix[c] && matrix[c][t]) || 0;
+      rowTotal += v; colTotals[ci] += v; grandTotal += v;
+      const td = document.createElement('td');
+      td.textContent = v > 0 ? fmtNum(v) : '—';
+      tr.appendChild(td);
+    });
+    const tdT = document.createElement('td');
+    tdT.textContent = fmtNum(rowTotal);
+    tdT.style.fontWeight = '700';
+    tr.appendChild(tdT);
+    tbody.appendChild(tr);
+  });
+  const trTotal = document.createElement('tr');
+  const thTot = document.createElement('th'); thTot.textContent = 'Total'; thTot.style.textAlign = 'left'; thTot.style.fontWeight = '700'; trTotal.appendChild(thTot);
+  colTotals.forEach(v => { const td = document.createElement('td'); td.textContent = fmtNum(v); td.style.fontWeight = '700'; trTotal.appendChild(td); });
+  const tdGrand = document.createElement('td'); tdGrand.textContent = fmtNum(grandTotal); tdGrand.style.fontWeight = '700'; trTotal.appendChild(tdGrand);
+  tbody.appendChild(trTotal);
+  table.appendChild(tbody);
+  container.innerHTML = '';
+  container.appendChild(table);
+}
+
+// =========================================================
+// Simple bar chart (Panels C & D) — one bar per territory
+// =========================================================
+function renderSimpleBarChart(svgId, territories, values, valueFmt, axisFmt, yLabel) {
+  const svg = document.getElementById(svgId);
+  const W = 520, H = 380;
+  const M = { top: 24, right: 14, bottom: 56, left: 60 };
+  const plotW = W - M.left - M.right;
+  const plotH = H - M.top - M.bottom;
+
+  svg.innerHTML = '';
+  svg.setAttribute('viewBox', `0 0 ${W} ${H}`);
+
+  const maxV = niceMax(Math.max(...values) * 1.15);
+  const ticks = niceTicks(maxV, 4);
+
+  ticks.forEach(tv => {
+    const y = M.top + plotH - (tv / maxV) * plotH;
+    svg.appendChild(el('line', { x1: M.left, x2: W - M.right, y1: y, y2: y, class: tv === 0 ? 'baseline-line' : 'grid-line' }));
+    const t = el('text', { x: M.left - 10, y: y + 4, class: 'tick-label axis-label', 'text-anchor': 'end' });
+    t.textContent = axisFmt(tv);
+    svg.appendChild(t);
+  });
+
+  const n = territories.length;
+  const slot = plotW / n;
+  const barW = Math.min(46, slot * 0.58);
+
+  territories.forEach((t, i) => {
+    const v = values[i];
+    const cx = M.left + slot * i + slot / 2;
+    const x0 = cx - barW / 2;
+    const segH = (v / maxV) * plotH;
+    const y = M.top + plotH - segH;
+    const r = 4;
+    const h = Math.max(segH, r);
+    const path = `M ${x0} ${y + h} L ${x0} ${y + r} Q ${x0} ${y} ${x0 + r} ${y} L ${x0 + barW - r} ${y} Q ${x0 + barW} ${y} ${x0 + barW} ${y + r} L ${x0 + barW} ${y + h} Z`;
+    svg.appendChild(el('path', { d: path, fill: `var(${TERR_COLOR_VAR[t]})` }));
+
+    if (v > 0) {
+      const lab = el('text', { x: cx, y: y - 8, class: 'bar-value-label', 'text-anchor': 'middle' });
+      lab.textContent = valueFmt(v);
+      svg.appendChild(lab);
+    }
+
+    const tickY = M.top + plotH + 14;
+    const xt = el('text', {
+      x: cx, y: tickY, class: 'tick-label', 'text-anchor': 'end',
+      transform: `rotate(-32 ${cx} ${tickY})`
+    });
+    xt.textContent = t;
+    svg.appendChild(xt);
+
+    const hit = el('rect', { x: M.left + slot * i, y: M.top, width: slot, height: plotH, class: 'hit-rect' });
+    svg.appendChild(hit);
+    hit.addEventListener('mousemove', (ev) => {
+      const box = document.createElement('div');
+      const title = document.createElement('div');
+      title.className = 'tt-title';
+      title.textContent = t;
+      box.appendChild(title);
+      box.appendChild(ttRow(yLabel, `var(${TERR_COLOR_VAR[t]})`, valueFmt(v)));
+      showTooltip(ev.clientX, ev.clientY, box);
+    });
+    hit.addEventListener('mouseleave', hideTooltip);
+  });
+
+  const yl = el('text', { x: -(M.top + plotH/2), y: 14, class: 'axis-label', 'text-anchor': 'middle', transform: 'rotate(-90)' });
+  yl.textContent = yLabel;
+  svg.appendChild(yl);
+}
+
+// =========================================================
+// Table views
+// =========================================================
+function buildQuarterTable(containerId, territories, quarters, seriesByTerr, valueFmt) {
+  const container = document.getElementById(containerId);
+  const table = document.createElement('table');
+  table.className = 'data-table';
+  const thead = document.createElement('thead');
+  const hr = document.createElement('tr');
+  hr.appendChild(document.createElement('th'));
+  quarters.forEach(q => { const th = document.createElement('th'); th.textContent = q; hr.appendChild(th); });
+  const thTotal = document.createElement('th'); thTotal.textContent = 'Total'; hr.appendChild(thTotal);
+  thead.appendChild(hr);
+  table.appendChild(thead);
+  const tbody = document.createElement('tbody');
+  const colTotals = quarters.map(() => 0);
+  let grandTotal = 0;
+  territories.forEach(t => {
+    const rowTotal = seriesByTerr[t].reduce((a,b)=>a+b,0);
+    if (rowTotal <= 0) return;
+    const tr = document.createElement('tr');
+    const th = document.createElement('th');
+    th.textContent = t;
+    th.style.textAlign = 'left';
+    tr.appendChild(th);
+    quarters.forEach((q, qi) => {
+      const v = seriesByTerr[t][qi] || 0;
+      colTotals[qi] += v;
+      const td = document.createElement('td');
+      td.textContent = valueFmt(v);
+      tr.appendChild(td);
+    });
+    grandTotal += rowTotal;
+    const tdT = document.createElement('td');
+    tdT.textContent = valueFmt(rowTotal);
+    tdT.style.fontWeight = '700';
+    tr.appendChild(tdT);
+    tbody.appendChild(tr);
+  });
+  const trTotal = document.createElement('tr');
+  const thTot = document.createElement('th'); thTot.textContent = 'Total'; thTot.style.textAlign = 'left'; thTot.style.fontWeight = '700'; trTotal.appendChild(thTot);
+  colTotals.forEach(v => { const td = document.createElement('td'); td.textContent = valueFmt(v); td.style.fontWeight = '700'; trTotal.appendChild(td); });
+  const tdGrand = document.createElement('td'); tdGrand.textContent = valueFmt(grandTotal); tdGrand.style.fontWeight = '700'; trTotal.appendChild(tdGrand);
+  tbody.appendChild(trTotal);
+  table.appendChild(tbody);
+  container.innerHTML = '';
+  container.appendChild(table);
+}
+
+function buildSimpleTable(containerId, territories, values, valueFmt, colLabel) {
+  const container = document.getElementById(containerId);
+  const table = document.createElement('table');
+  table.className = 'data-table';
+  const thead = document.createElement('thead');
+  const hr = document.createElement('tr');
+  const th0 = document.createElement('th'); th0.textContent = 'Territory'; hr.appendChild(th0);
+  const th1 = document.createElement('th'); th1.textContent = colLabel; hr.appendChild(th1);
+  thead.appendChild(hr);
+  table.appendChild(thead);
+  const tbody = document.createElement('tbody');
+  territories.forEach((t, i) => {
+    const tr = document.createElement('tr');
+    const th = document.createElement('th'); th.textContent = t; th.style.textAlign = 'left'; tr.appendChild(th);
+    const td = document.createElement('td'); td.textContent = valueFmt(values[i]); tr.appendChild(td);
+    tbody.appendChild(tr);
+  });
+  table.appendChild(tbody);
+  container.innerHTML = '';
+  container.appendChild(table);
+}
+
+// =========================================================
+// Full detail table (Panel E) — master-sheet-style line items
+// =========================================================
+function buildDetailTable(containerId, channelOrder, lineItems, currencyMode) {
+  const container = document.getElementById(containerId);
+  const isLocal = currencyMode === 'LOCAL';
+  const table = document.createElement('table');
+  table.className = 'data-table';
+
+  const thead = document.createElement('thead');
+  const hr = document.createElement('tr');
+  ['Item', 'Territory', 'FY-QTR', 'Status', isLocal ? 'Budget (Local)' : 'Budget €', 'Opps', 'Note'].forEach((label, i) => {
+    const th = document.createElement('th');
+    th.textContent = label;
+    if (i === 1 || i === 2 || i === 3) th.className = 'detail-center';
+    if (i === 6) th.className = 'detail-note';
+    hr.appendChild(th);
+  });
+  thead.appendChild(hr);
+  table.appendChild(thead);
+
+  const tbody = document.createElement('tbody');
+  let grandBudget = 0, grandOpps = 0;
+  // Subtotals and the grand total are always summed in € — "Budget (Local)" mixes $/€/£ per
+  // item and can't be added together meaningfully, so those rows stay in € with a "(€)" tag.
+  const fmtSub = (v) => isLocal ? fmtEUR(v) + ' (€)' : fmtEUR(v);
+
+  channelOrder.forEach(ch => {
+    const items = lineItems.filter(it => it.channel === ch);
+    if (!items.length) return;
+    const notRemoved = items.filter(it => !it.removed);
+    const subBudget = notRemoved.reduce((s, it) => s + (it.budgetEUR != null ? it.budgetEUR : 0), 0);
+    const subOpps = notRemoved.reduce((s, it) => s + (it.opps != null ? it.opps : 0), 0);
+    grandBudget += subBudget; grandOpps += subOpps;
+
+    const trHead = document.createElement('tr');
+    trHead.className = 'detail-group-row';
+    const thCh = document.createElement('th'); thCh.textContent = ch; thCh.style.textAlign = 'left'; trHead.appendChild(thCh);
+    trHead.appendChild(document.createElement('td'));
+    trHead.appendChild(document.createElement('td'));
+    trHead.appendChild(document.createElement('td'));
+    const tdBudget = document.createElement('td'); tdBudget.textContent = fmtSub(subBudget); trHead.appendChild(tdBudget);
+    const tdOpps = document.createElement('td'); tdOpps.textContent = fmtNum(subOpps); trHead.appendChild(tdOpps);
+    trHead.appendChild(document.createElement('td'));
+    tbody.appendChild(trHead);
+
+    items.forEach(it => {
+      const tr = document.createElement('tr');
+      if (it.removed) tr.className = 'detail-removed-row';
+      const tdItem = document.createElement('td'); tdItem.textContent = it.item; tr.appendChild(tdItem);
+      const tdTerr = document.createElement('td'); tdTerr.textContent = it.territory || '—'; tdTerr.className = 'detail-center'; tr.appendChild(tdTerr);
+      const tdQtr = document.createElement('td'); tdQtr.textContent = it.fyQtr || '—'; tdQtr.className = 'detail-center'; tr.appendChild(tdQtr);
+      const tdStatus = document.createElement('td');
+      tdStatus.textContent = it.removed ? 'Removed' : (it.status || '—');
+      tdStatus.className = 'detail-center';
+      tr.appendChild(tdStatus);
+      const tdBudget2 = document.createElement('td');
+      tdBudget2.textContent = isLocal ? fmtLocal(it.budgetLocal, it.budgetLocalCurrency) : (it.budgetEUR != null ? fmtEUR(it.budgetEUR) : '—');
+      tr.appendChild(tdBudget2);
+      const tdOpps2 = document.createElement('td'); tdOpps2.textContent = it.opps != null ? fmtNum(it.opps) : '—'; tr.appendChild(tdOpps2);
+      const tdNote = document.createElement('td'); tdNote.textContent = it.note || '—'; tdNote.className = 'detail-note'; tr.appendChild(tdNote);
+      tbody.appendChild(tr);
+    });
+  });
+
+  const trGrand = document.createElement('tr');
+  trGrand.className = 'detail-grand-row';
+  const thGrand = document.createElement('th'); thGrand.textContent = 'Grand total'; thGrand.style.textAlign = 'left'; trGrand.appendChild(thGrand);
+  trGrand.appendChild(document.createElement('td'));
+  trGrand.appendChild(document.createElement('td'));
+  trGrand.appendChild(document.createElement('td'));
+  const tdGB = document.createElement('td'); tdGB.textContent = fmtSub(grandBudget); trGrand.appendChild(tdGB);
+  const tdGO = document.createElement('td'); tdGO.textContent = fmtNum(grandOpps); trGrand.appendChild(tdGO);
+  trGrand.appendChild(document.createElement('td'));
+  tbody.appendChild(trGrand);
+
+  table.appendChild(tbody);
+  container.innerHTML = '';
+  container.appendChild(table);
+}
+
+// =========================================================
+// Wire it all up
+// =========================================================
+// ---------- global filters ----------
+let fyFilter = 'All';        // 'All' | 'FY27' | 'FY28'
+let terrFilter = 'All';      // 'All' | one of TERRITORIES
+let currencyFilter = 'EUR';  // 'EUR' | 'LOCAL' — detail-table display only (see parseLocalMoney note)
+
+function scopeLabel() {
+  const fy = fyFilter === 'All' ? 'all fiscal years' : fyFilter;
+  const terr = terrFilter === 'All' ? 'all territories' : terrFilter;
+  const cur = currencyFilter === 'LOCAL' ? ' · Budget (Local) in detail table' : '';
+  return `Showing: ${fy} · ${terr}${cur}`;
+}
+
+function draw() {
+  const scopedQuarters = fyFilter === 'All' ? DATA.quarters : DATA.quarters.filter(q => q.startsWith(fyFilter));
+  const scopedTerritories = terrFilter === 'All' ? DATA.territories : [terrFilter];
+  const scopedItems = DATA.line_items.filter(x => fyFilter === 'All' || x.fy === fyFilter);
+  const agg = aggregate(scopedItems, scopedQuarters, scopedTerritories);
+
+  document.getElementById('filter-summary').textContent = scopeLabel();
+  const fyText = fyFilter === 'All' ? 'FY27–FY28' : fyFilter;
+  const terrText = terrFilter === 'All' ? 'by territory' : `for ${terrFilter}`;
+  document.getElementById('descA').textContent = `What each territory is projected to get, quarter over quarter (${fyText})`;
+  document.getElementById('descB').textContent = `Where the budget is going, quarter over quarter (${fyText})`;
+  document.getElementById('descC').textContent = `Total budget ${terrText}, ${fyText}`;
+  document.getElementById('descD').textContent = `Total opportunity count (pipeline) ${terrText}, ${fyText}`;
+
+  renderStackedChart('chartA', 'legendA', scopedTerritories, scopedQuarters, agg.opps_by_terr_qtr, fmtNum, v => v.toLocaleString('en-US'), 'Opportunities');
+  renderStackedChart('chartB', 'legendB', scopedTerritories, scopedQuarters, agg.spend_by_terr_qtr, fmtEUR, fmtEURk, 'Spend (EUR)');
+  renderQuarterHeatmap('chartA-hm', 'legendA-hm', scopedTerritories, scopedQuarters, agg.opps_by_terr_qtr, fmtNum, 'Opps');
+  renderQuarterHeatmap('chartB-hm', 'legendB-hm', scopedTerritories, scopedQuarters, agg.spend_by_terr_qtr, fmtEUR, 'Spend');
+
+  const terrByCoverage = scopedTerritories.slice().filter(t => agg.opps_total_by_terr[t] > 0).sort((a, b) => {
+    const covA = agg.opps_by_terr_qtr[a].filter(v => (v || 0) > 0).length;
+    const covB = agg.opps_by_terr_qtr[b].filter(v => (v || 0) > 0).length;
+    if (covB !== covA) return covB - covA;
+    return agg.opps_total_by_terr[b] - agg.opps_total_by_terr[a];
+  });
+  renderChannelHeatmap('chartI', 'legendI', terrByCoverage, agg.channels, agg.opps_by_channel_terr);
+  buildChannelHeatmapTable('chartI-table', terrByCoverage, agg.channels, agg.opps_by_channel_terr);
+
+  const terrBySpend = scopedTerritories.slice().sort((a,b) => agg.spend_total_by_terr[b] - agg.spend_total_by_terr[a]);
+  const spendVals = terrBySpend.map(t => agg.spend_total_by_terr[t]);
+  const oppsVals = terrBySpend.map(t => agg.opps_total_by_terr[t]);
+
+  renderSimpleBarChart('chartC', terrBySpend, spendVals, fmtEUR, fmtEURk, 'Spend (EUR)');
+  renderSimpleBarChart('chartD', terrBySpend, oppsVals, fmtNum, v => v.toLocaleString('en-US'), 'Opps');
+
+  buildQuarterTable('chartA-table', scopedTerritories, scopedQuarters, agg.opps_by_terr_qtr, fmtNum);
+  buildQuarterTable('chartB-table', scopedTerritories, scopedQuarters, agg.spend_by_terr_qtr, fmtEUR);
+  buildSimpleTable('chartC-table', terrBySpend, spendVals, fmtEUR, 'Spend');
+  buildSimpleTable('chartD-table', terrBySpend, oppsVals, fmtNum, 'Opps');
+
+  const detailItems = scopedItems.filter(x => terrFilter === 'All' || x.territory === terrFilter);
+  buildDetailTable('detailTable', DATA.channel_order, detailItems, currencyFilter);
+  document.getElementById('descE').textContent = currencyFilter === 'LOCAL'
+    ? 'Every planned line item, grouped by channel like the master sheet — showing each item’s original local-currency budget ($/€/£). Subtotals and the grand total stay in € (marked "(€)"), since amounts in different currencies can’t be summed directly. Respects the filters above.'
+    : 'Every planned line item, grouped by channel like the master sheet — quarter and opps per item, subtotals per channel, grand total at the bottom. Respects the filters above.';
+}
+
+// populate the territory filter once (the territory list is a fixed constant, known before data loads)
+(function initFilterControls() {
+  const sel = document.getElementById('terr-filter');
+  TERRITORIES.forEach(t => {
+    const opt = document.createElement('option');
+    opt.value = t; opt.textContent = t;
+    sel.appendChild(opt);
+  });
+  document.querySelectorAll('#fy-filter button').forEach(btn => {
+    btn.addEventListener('click', () => {
+      fyFilter = btn.getAttribute('data-fy');
+      document.querySelectorAll('#fy-filter button').forEach(b => b.classList.toggle('active', b === btn));
+      if (DATA) draw();
+    });
+  });
+  sel.addEventListener('change', () => {
+    terrFilter = sel.value;
+    if (DATA) draw();
+  });
+  document.querySelectorAll('#currency-filter button').forEach(btn => {
+    btn.addEventListener('click', () => {
+      currencyFilter = btn.getAttribute('data-currency');
+      document.querySelectorAll('#currency-filter button').forEach(b => b.classList.toggle('active', b === btn));
+      if (DATA) draw();
+    });
+  });
+  document.getElementById('filter-reset').addEventListener('click', () => {
+    fyFilter = 'All'; terrFilter = 'All'; currencyFilter = 'EUR';
+    sel.value = 'All';
+    document.querySelectorAll('#fy-filter button').forEach(b => b.classList.toggle('active', b.getAttribute('data-fy') === 'All'));
+    document.querySelectorAll('#currency-filter button').forEach(b => b.classList.toggle('active', b.getAttribute('data-currency') === 'EUR'));
+    if (DATA) draw();
+  });
+})();
+
+// two-way toggles (chart <-> table) — Panels A3/C/D
+document.querySelectorAll('.view-toggle').forEach(btn => {
+  btn.addEventListener('click', () => {
+    const id = btn.getAttribute('data-toggle-for');
+    const chartDiv = document.getElementById(id + '-chart');
+    const tableDiv = document.getElementById(id + '-table');
+    const showingChart = chartDiv.style.display !== 'none';
+    chartDiv.style.display = showingChart ? 'none' : '';
+    tableDiv.style.display = showingChart ? '' : 'none';
+    btn.textContent = showingChart ? 'View as chart' : 'View as table';
+  });
+});
+
+// three-way toggles (bar <-> heatmap <-> table) — Panels A & B
+document.querySelectorAll('[data-view-group]').forEach(group => {
+  const id = group.getAttribute('data-view-group');
+  const views = { bar: document.getElementById(id + '-bar'), heatmap: document.getElementById(id + '-heatmap'), table: document.getElementById(id + '-table') };
+  group.querySelectorAll('button').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const view = btn.getAttribute('data-view');
+      Object.entries(views).forEach(([k, elDiv]) => { elDiv.style.display = k === view ? '' : 'none'; });
+      group.querySelectorAll('button').forEach(b => b.classList.toggle('active', b === btn));
+    });
+  });
+});
+
+// theme toggle
+function setTheme(mode) {
+  if (mode === 'system') document.documentElement.removeAttribute('data-theme');
+  else document.documentElement.setAttribute('data-theme', mode);
+  document.querySelectorAll('[data-theme-btn]').forEach(b => {
+    b.classList.toggle('active', b.getAttribute('data-theme-btn') === mode);
+  });
+}
+document.querySelectorAll('[data-theme-btn]').forEach(b => {
+  b.addEventListener('click', () => setTheme(b.getAttribute('data-theme-btn')));
+});
+setTheme('system');
+
+document.getElementById('refresh-btn').addEventListener('click', () => loadLiveData(true));
+loadLiveData(false);
+window.addEventListener('resize', () => { if (DATA) draw(); });
+</script>
+</body>
+</html>
