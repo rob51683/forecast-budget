@@ -3,7 +3,7 @@
 {
   "name": "Fy28 Territory Budget",
   "schemaVersion": 1,
-  "description": "FY28 budget planning dashboard, live-synced from a Google Sheet on every load (with a fallback snapshot if the fetch is blocked). Global fiscal-year and territory filters scope every chart and table: opps and spend by territory/quarter, a channel-mix heatmap (channel x territory), total spend and projected opps per territory, plus a full line-item detail table mirroring the master planning sheet (grouped by channel, subtotals, grand total). Totals are shown in each table view rather than annotated on the charts themselves. Source: live Google Sheet (https://docs.google.com/spreadsheets/d/1uYimlEb3AbTUQ_Mev2is1z_EaOqiOtwK8GFdDyk1AmQ).",
+  "description": "FY28 budget planning dashboard, live-synced from a Google Sheet on every load (with a fallback snapshot if the fetch is blocked). Global fiscal-year, territory, and budget-currency filters scope every full-width chart and table: opps by territory/quarter, a channel-mix heatmap (channel x territory), a stacked pipeline (€-equivalent) by territory/quarter chart sourced from the sheet's own 'Pivot table 1' (SUM of Pipeline by Regions x FY-QTR), spend by territory/quarter, plus a full line-item detail table mirroring the master planning sheet (grouped by channel, subtotals, grand total, currency-aware). US pipeline ($) is converted to € using the FX rate implied by the sheet's own Budget-Local/Budget-€ pairs, so all territories can stack on one axis. Source: live Google Sheet (https://docs.google.com/spreadsheets/d/1uYimlEb3AbTUQ_Mev2is1z_EaOqiOtwK8GFdDyk1AmQ).",
   "mcpTools": [],
   "mcpServerNames": []
 }
@@ -191,8 +191,6 @@
   }
   .view-seg button.active { background: var(--terr-US); color: #fff; }
 
-  .row-2col { display: flex; gap: 20px; flex-wrap: wrap; }
-  .row-2col .card { flex: 1 1 340px; margin-top: 0; }
 
   svg { display: block; width: 100%; height: auto; overflow: visible; }
   .axis-label { fill: var(--text-muted); font-size: 11px; }
@@ -333,11 +331,36 @@
       <div class="legend" id="legendI"></div>
     </div>
 
+    <!-- Panel P: Pipeline by territory, by quarter — reads the same global filters as Panel A; currency
+         switches to native $ only when the Territory filter isolates "US" alone -->
+    <div class="card">
+      <div class="card-head">
+        <div>
+          <h2 id="chartP-title">Pipeline (€ equivalent) by territory, by quarter</h2>
+          <p class="desc" id="descP1">Expected pipeline value per territory, quarter over quarter, from the sheet's pivot table</p>
+        </div>
+        <div class="view-seg" data-view-group="chartP">
+          <button type="button" data-view="bar" class="active">Bar</button>
+          <button type="button" data-view="heatmap">Heatmap</button>
+          <button type="button" data-view="table">Table</button>
+        </div>
+      </div>
+      <div id="chartP-bar">
+        <svg id="chartP" viewBox="0 0 1100 400"></svg>
+        <div class="legend" id="legendP"></div>
+      </div>
+      <div id="chartP-heatmap" style="display:none;">
+        <svg id="chartP-hm" viewBox="0 0 1100 330"></svg>
+        <div class="legend" id="legendP-hm"></div>
+      </div>
+      <div id="chartP-table" style="display:none;"></div>
+    </div>
+
     <!-- Panel B: Spend by territory by quarter -->
     <div class="card">
       <div class="card-head">
         <div>
-          <h2>Spend by territory, by quarter</h2>
+          <h2 id="chartB-title">Spend by territory, by quarter</h2>
           <p class="desc" id="descB">Where the budget is going, quarter over quarter</p>
         </div>
         <div class="view-seg" data-view-group="chartB">
@@ -357,31 +380,6 @@
       <div id="chartB-table" style="display:none;"></div>
     </div>
 
-    <!-- Panel C+D: totals side by side -->
-    <div class="row-2col">
-      <div class="card">
-        <div class="card-head">
-          <div>
-            <h2>Total spend by territory</h2>
-            <p class="desc" id="descC">Budget, by territory</p>
-          </div>
-          <button class="view-toggle" data-toggle-for="chartC">View as table</button>
-        </div>
-        <div id="chartC-chart"><svg id="chartC" viewBox="0 0 520 380"></svg></div>
-        <div id="chartC-table" style="display:none;"></div>
-      </div>
-      <div class="card">
-        <div class="card-head">
-          <div>
-            <h2>Total opps projected by territory</h2>
-            <p class="desc" id="descD">Opportunity count (pipeline), by territory</p>
-          </div>
-          <button class="view-toggle" data-toggle-for="chartD">View as table</button>
-        </div>
-        <div id="chartD-chart"><svg id="chartD" viewBox="0 0 520 380"></svg></div>
-        <div id="chartD-table" style="display:none;"></div>
-      </div>
-    </div>
 
     <!-- Panel E: full line-item detail, mirrors the master planning sheet -->
     <div class="card">
@@ -405,7 +403,26 @@
 
 <script>
 let DATA = null;
-const FALLBACK_DATA = {"quarters": ["FY27-Q2", "FY27-Q3", "FY27-Q4", "FY28-Q1", "FY28-Q2", "FY28-Q3", "FY28-Q4"], "territories": ["US", "EU-France", "EU-UK", "EU-SWIAUS", "EU-Nordics", "EU-DE1", "EU-DE2", "Other"], "spend_by_terr_qtr": {"US": [13300, 43700, 21280, 112100, 66880, 51680, 22800], "EU-France": [0, 0, 9500, 8000, 31342, 8000, 0], "EU-UK": [0, 0, 0, 8000, 8000, 8000, 0], "EU-SWIAUS": [0, 0, 0, 8000, 17500, 8000, 15000], "EU-Nordics": [0, 0, 0, 8000, 17500, 64000, 0], "EU-DE1": [0, 0, 0, 8000, 8000, 8000, 0], "EU-DE2": [0, 0, 0, 8000, 8000, 8000, 0], "Other": [0, 0, 0, 9500, 5000, 22200, 32000]}, "opps_by_terr_qtr": {"US": [2, 4, 1, 13, 7, 7, 2], "EU-France": [0, 0, 1, 2, 6, 2, 0], "EU-UK": [0, 0, 0, 2, 2, 2, 0], "EU-SWIAUS": [0, 0, 0, 3, 4, 3, 2], "EU-Nordics": [0, 0, 0, 2, 3, 8, 0], "EU-DE1": [0, 0, 0, 3, 3, 3, 1], "EU-DE2": [0, 0, 0, 3, 3, 3, 1], "Other": [0, 0, 0, 1, 2, 4, 4]}, "spend_total_by_terr": {"US": 336300, "EU-France": 56842, "EU-UK": 24000, "EU-SWIAUS": 48500, "EU-Nordics": 89500, "EU-DE1": 24000, "EU-DE2": 24000, "Other": 68700}, "opps_total_by_terr": {"US": 37.5, "EU-France": 11, "EU-UK": 6, "EU-SWIAUS": 12, "EU-Nordics": 13, "EU-DE1": 10, "EU-DE2": 10, "Other": 11}, "channels": ["Conferences", "Co-marketing events", "Digital", "Organic", "Online events", "AI search", "User events (ASUG)"], "opps_by_channel_terr": {"Conferences": {"US": 24, "EU-France": 4, "EU-UK": 0, "EU-SWIAUS": 1, "EU-Nordics": 6, "EU-DE1": 0, "EU-DE2": 0, "Other": 9}, "Co-marketing events": {"US": 3, "EU-France": 3, "EU-UK": 3, "EU-SWIAUS": 3, "EU-Nordics": 3, "EU-DE1": 3, "EU-DE2": 3, "Other": 1}, "Digital": {"US": 3, "EU-France": 3, "EU-UK": 3, "EU-SWIAUS": 3, "EU-Nordics": 3, "EU-DE1": 3, "EU-DE2": 3, "Other": 0}, "Organic": {"US": 0, "EU-France": 0, "EU-UK": 0, "EU-SWIAUS": 4, "EU-Nordics": 0, "EU-DE1": 4, "EU-DE2": 4, "Other": 0}, "Online events": {"US": 3, "EU-France": 1, "EU-UK": 0, "EU-SWIAUS": 1, "EU-Nordics": 1, "EU-DE1": 0, "EU-DE2": 0, "Other": 1}, "AI search": {"US": 3, "EU-France": 0, "EU-UK": 0, "EU-SWIAUS": 0, "EU-Nordics": 0, "EU-DE1": 0, "EU-DE2": 0, "Other": 0}, "User events (ASUG)": {"US": 1.5, "EU-France": 0, "EU-UK": 0, "EU-SWIAUS": 0, "EU-Nordics": 0, "EU-DE1": 0, "EU-DE2": 0, "Other": 0}}, "meta": {"total_spend_all": 800842, "untagged_budget": 129000, "total_opps_tagged": 110.5, "line_items": 73}, "channel_order": ["Conferences", "User events (ASUG)", "Co-marketing events", "Online events", "Analyst", "Digital", "Organic", "AI search"], "line_items": [{"channel": "Conferences", "item": "10-SSOW LATAM Mexico City 2026", "territory": "US", "fy": "FY27", "fyQtr": "FY27-Q2", "status": "New", "budgetEUR": 13300.0, "budgetLocal": 17500.0, "budgetLocalCurrency": "$", "opps": 2.0, "note": "3 passes, updated pricing", "removed": false}, {"channel": "Conferences", "item": "11-Millennium CFO Alliance Austin 2026", "territory": "US", "fy": "FY27", "fyQtr": "FY27-Q3", "status": "New", "budgetEUR": 34200.0, "budgetLocal": 45000.0, "budgetLocalCurrency": "$", "opps": 3.0, "note": "would be heavily negotiated", "removed": false}, {"channel": "Conferences", "item": "02-Millennium CFO Alliance Houston 2026", "territory": "US", "fy": "FY28", "fyQtr": "FY28-Q1", "status": "New", "budgetEUR": 34200.0, "budgetLocal": 45000.0, "budgetLocalCurrency": "$", "opps": 3.0, "note": "would be heavily negotiated", "removed": false}, {"channel": "Conferences", "item": "03-SSOW US  Orlando 2027", "territory": "US", "fy": "FY28", "fyQtr": "FY28-Q1", "status": "New", "budgetEUR": 24320.0, "budgetLocal": 32000.0, "budgetLocalCurrency": "$", "opps": 3.0, "note": "Last yr price", "removed": false}, {"channel": "Conferences", "item": "03-GBS Select Mtgs Orlando 2027", "territory": "US", "fy": "FY28", "fyQtr": "FY28-Q1", "status": "Same", "budgetEUR": 22800.0, "budgetLocal": 30000.0, "budgetLocalCurrency": "$", "opps": 3.0, "note": "Last yr price", "removed": false}, {"channel": "Conferences", "item": "05-Gartner CFO Symposium US", "territory": "US", "fy": null, "fyQtr": null, "status": "REMOVE", "budgetEUR": null, "budgetLocal": null, "budgetLocalCurrency": null, "opps": null, "note": null, "removed": true}, {"channel": "Conferences", "item": "05-Gartner CFO Symposium UK", "territory": "US", "fy": null, "fyQtr": null, "status": "REMOVE", "budgetEUR": null, "budgetLocal": null, "budgetLocalCurrency": null, "opps": null, "note": null, "removed": true}, {"channel": "Conferences", "item": "05-SSOW Europe Libson 2027", "territory": "EU-France", "fy": "FY28", "fyQtr": "FY28-Q2", "status": "Same", "budgetEUR": 23342.0, "budgetLocal": 19950.0, "budgetLocalCurrency": "\u00a3", "opps": 4.0, "note": "Last yr price", "removed": false}, {"channel": "Conferences", "item": "06-CFO Select Mtgs Atlanta 2027", "territory": "US", "fy": "FY28", "fyQtr": "FY28-Q2", "status": "Same", "budgetEUR": 22800.0, "budgetLocal": 30000.0, "budgetLocalCurrency": "$", "opps": 2.0, "note": "Last yr price", "removed": false}, {"channel": "Conferences", "item": "07-ABSL Forum DACH 2027.", "territory": "Other", "fy": "FY28", "fyQtr": "FY28-Q2", "status": "Same", "budgetEUR": 5000.0, "budgetLocal": 5000.0, "budgetLocalCurrency": "\u20ac", "opps": 2.0, "note": "Last yr price", "removed": false}, {"channel": "Conferences", "item": "09-SSOW San Diego 2027", "territory": "US", "fy": "FY28", "fyQtr": "FY28-Q2", "status": "New", "budgetEUR": 22800.0, "budgetLocal": 30000.0, "budgetLocalCurrency": "$", "opps": 2.0, "note": "Estimated price", "removed": false}, {"channel": "Conferences", "item": "09-GBS Select Mtgs San Diego 2027", "territory": "US", "fy": "FY28", "fyQtr": "FY28-Q3", "status": "Same", "budgetEUR": 22800.0, "budgetLocal": 30000.0, "budgetLocalCurrency": "$", "opps": 2.0, "note": "Last yr price", "removed": false}, {"channel": "Conferences", "item": "09-Accounting Summit DE 2027", "territory": "Other", "fy": "FY28", "fyQtr": "FY28-Q3", "status": "Same", "budgetEUR": 15000.0, "budgetLocal": 15000.0, "budgetLocalCurrency": "\u20ac", "opps": 3.0, "note": "Last yr price", "removed": false}, {"channel": "Conferences", "item": "10-SSOW Autumn Amsterdam 2027", "territory": "EU-Nordics", "fy": "FY28", "fyQtr": "FY28-Q3", "status": "New", "budgetEUR": 28000.0, "budgetLocal": 28000.0, "budgetLocalCurrency": "\u20ac", "opps": 3.0, "note": "Estimated price", "removed": false}, {"channel": "Conferences", "item": "10-CFO Exchange Amsterdam Mtgs 2027", "territory": "EU-Nordics", "fy": "FY28", "fyQtr": "FY28-Q3", "status": "New", "budgetEUR": 28000.0, "budgetLocal": 28000.0, "budgetLocalCurrency": "\u20ac", "opps": 3.0, "note": "Estimated price", "removed": false}, {"channel": "Conferences", "item": "10-SSOW LATAM Mexico City 2027", "territory": "US", "fy": "FY28", "fyQtr": "FY28-Q3", "status": "New", "budgetEUR": 13300.0, "budgetLocal": 17500.0, "budgetLocalCurrency": "$", "opps": 2.0, "note": "Quoted price this year", "removed": false}, {"channel": "Conferences", "item": "11-CFO Select Mtgs 2027 Miami 2027", "territory": "US", "fy": "FY28", "fyQtr": "FY28-Q4", "status": "Same", "budgetEUR": 22800.0, "budgetLocal": 30000.0, "budgetLocalCurrency": "$", "opps": 2.0, "note": "Last yr price", "removed": false}, {"channel": "Conferences", "item": "11-SSOW Berlin 2027", "territory": "Other", "fy": "FY28", "fyQtr": "FY28-Q4", "status": "Same", "budgetEUR": 32000.0, "budgetLocal": 32000.0, "budgetLocalCurrency": "\u20ac", "opps": 4.0, "note": "Last yr price", "removed": false}, {"channel": "Conferences", "item": "11-Austria CFO Day 2027", "territory": "EU-SWIAUS", "fy": "FY28", "fyQtr": "FY28-Q4", "status": "New", "budgetEUR": 15000.0, "budgetLocal": 15000.0, "budgetLocalCurrency": "\u20ac", "opps": 1.0, "note": "What was price?", "removed": false}, {"channel": "User events (ASUG)", "item": "Events for 2026 Q3 (x1)", "territory": "US", "fy": "FY27", "fyQtr": null, "status": "New", "budgetEUR": 1520.0, "budgetLocal": 2000.0, "budgetLocalCurrency": "$", "opps": 0.5, "note": "Estimate", "removed": false}, {"channel": "User events (ASUG)", "item": "Events for 2026 Q4 (x2)", "territory": "US", "fy": "FY27", "fyQtr": null, "status": "New", "budgetEUR": 3040.0, "budgetLocal": 4000.0, "budgetLocalCurrency": "$", "opps": 1.0, "note": "Estimate", "removed": false}, {"channel": "Co-marketing events", "item": "09-MasterClass Acctg Summit - 2 partners", "territory": "Other", "fy": "FY28", "fyQtr": "FY28-Q3", "status": "Same", "budgetEUR": 7200.0, "budgetLocal": 7200.0, "budgetLocalCurrency": "\u20ac", "opps": 1.0, "note": null, "removed": false}, {"channel": "Co-marketing events", "item": "Partner Roundtables US Q1", "territory": "US", "fy": "FY28", "fyQtr": "FY28-Q1", "status": "New", "budgetEUR": 2280.0, "budgetLocal": 3000.0, "budgetLocalCurrency": "$", "opps": 1.0, "note": null, "removed": false}, {"channel": "Co-marketing events", "item": "Partner Roundtables US Q2", "territory": "US", "fy": "FY28", "fyQtr": "FY28-Q2", "status": "New", "budgetEUR": 2280.0, "budgetLocal": 3000.0, "budgetLocalCurrency": "$", "opps": 1.0, "note": null, "removed": false}, {"channel": "Co-marketing events", "item": "Partner Roundtables US Q3", "territory": "US", "fy": "FY28", "fyQtr": "FY28-Q3", "status": "New", "budgetEUR": 2280.0, "budgetLocal": 3000.0, "budgetLocalCurrency": "$", "opps": 1.0, "note": null, "removed": false}, {"channel": "Co-marketing events", "item": "Partner Roundtables EU-South Q1", "territory": "EU-France", "fy": "FY28", "fyQtr": "FY28-Q1", "status": "New", "budgetEUR": 3000.0, "budgetLocal": 3000.0, "budgetLocalCurrency": "\u20ac", "opps": 1.0, "note": null, "removed": false}, {"channel": "Co-marketing events", "item": "Partner Roundtables EU-South Q2", "territory": "EU-France", "fy": "FY28", "fyQtr": "FY28-Q2", "status": "New", "budgetEUR": 3000.0, "budgetLocal": 3000.0, "budgetLocalCurrency": "\u20ac", "opps": 1.0, "note": null, "removed": false}, {"channel": "Co-marketing events", "item": "Partner Roundtables EU-South Q3", "territory": "EU-France", "fy": "FY28", "fyQtr": "FY28-Q3", "status": "New", "budgetEUR": 3000.0, "budgetLocal": 3000.0, "budgetLocalCurrency": "\u20ac", "opps": 1.0, "note": null, "removed": false}, {"channel": "Co-marketing events", "item": "Partner Roundtables EU-UK Q1", "territory": "EU-UK", "fy": "FY28", "fyQtr": "FY28-Q1", "status": "New", "budgetEUR": 3000.0, "budgetLocal": 3000.0, "budgetLocalCurrency": "\u20ac", "opps": 1.0, "note": null, "removed": false}, {"channel": "Co-marketing events", "item": "Partner Roundtables EU-UK Q2", "territory": "EU-UK", "fy": "FY28", "fyQtr": "FY28-Q2", "status": "New", "budgetEUR": 3000.0, "budgetLocal": 3000.0, "budgetLocalCurrency": "\u20ac", "opps": 1.0, "note": null, "removed": false}, {"channel": "Co-marketing events", "item": "Partner Roundtables EU-UK Q3", "territory": "EU-UK", "fy": "FY28", "fyQtr": "FY28-Q3", "status": "New", "budgetEUR": 3000.0, "budgetLocal": 3000.0, "budgetLocalCurrency": "\u20ac", "opps": 1.0, "note": null, "removed": false}, {"channel": "Co-marketing events", "item": "Partner Roundtables EU-Central Q1", "territory": "EU-SWIAUS", "fy": "FY28", "fyQtr": "FY28-Q1", "status": "New", "budgetEUR": 3000.0, "budgetLocal": 3000.0, "budgetLocalCurrency": "\u20ac", "opps": 1.0, "note": null, "removed": false}, {"channel": "Co-marketing events", "item": "Partner Roundtables EU-Central Q2", "territory": "EU-SWIAUS", "fy": "FY28", "fyQtr": "FY28-Q2", "status": "New", "budgetEUR": 3000.0, "budgetLocal": 3000.0, "budgetLocalCurrency": "\u20ac", "opps": 1.0, "note": null, "removed": false}, {"channel": "Co-marketing events", "item": "Partner Roundtables EU-Central Q3", "territory": "EU-SWIAUS", "fy": "FY28", "fyQtr": "FY28-Q3", "status": "New", "budgetEUR": 3000.0, "budgetLocal": 3000.0, "budgetLocalCurrency": "\u20ac", "opps": 1.0, "note": null, "removed": false}, {"channel": "Co-marketing events", "item": "Partner Roundtables EU-Nordics Q1", "territory": "EU-Nordics", "fy": "FY28", "fyQtr": "FY28-Q1", "status": "New", "budgetEUR": 3000.0, "budgetLocal": 3000.0, "budgetLocalCurrency": "\u20ac", "opps": 1.0, "note": null, "removed": false}, {"channel": "Co-marketing events", "item": "Partner Roundtables EU-Nordics Q2", "territory": "EU-Nordics", "fy": "FY28", "fyQtr": "FY28-Q2", "status": "New", "budgetEUR": 3000.0, "budgetLocal": 3000.0, "budgetLocalCurrency": "\u20ac", "opps": 1.0, "note": null, "removed": false}, {"channel": "Co-marketing events", "item": "Partner Roundtables EU-Nordics Q3", "territory": "EU-Nordics", "fy": "FY28", "fyQtr": "FY28-Q3", "status": "New", "budgetEUR": 3000.0, "budgetLocal": 3000.0, "budgetLocalCurrency": "\u20ac", "opps": 1.0, "note": null, "removed": false}, {"channel": "Co-marketing events", "item": "Partner Roundtables EU-DE1 Q1", "territory": "EU-DE1", "fy": "FY28", "fyQtr": "FY28-Q1", "status": "New", "budgetEUR": 3000.0, "budgetLocal": 3000.0, "budgetLocalCurrency": "\u20ac", "opps": 1.0, "note": null, "removed": false}, {"channel": "Co-marketing events", "item": "Partner Roundtables EU-DE1 Q2", "territory": "EU-DE1", "fy": "FY28", "fyQtr": "FY28-Q2", "status": "New", "budgetEUR": 3000.0, "budgetLocal": 3000.0, "budgetLocalCurrency": "\u20ac", "opps": 1.0, "note": null, "removed": false}, {"channel": "Co-marketing events", "item": "Partner Roundtables EU-DE1 Q3", "territory": "EU-DE1", "fy": "FY28", "fyQtr": "FY28-Q3", "status": "New", "budgetEUR": 3000.0, "budgetLocal": 3000.0, "budgetLocalCurrency": "\u20ac", "opps": 1.0, "note": null, "removed": false}, {"channel": "Co-marketing events", "item": "Partner Roundtables EU-DE2 Q1", "territory": "EU-DE2", "fy": "FY28", "fyQtr": "FY28-Q1", "status": "New", "budgetEUR": 3000.0, "budgetLocal": 3000.0, "budgetLocalCurrency": "\u20ac", "opps": 1.0, "note": null, "removed": false}, {"channel": "Co-marketing events", "item": "Partner Roundtables EU-DE2 Q2", "territory": "EU-DE2", "fy": "FY28", "fyQtr": "FY28-Q2", "status": "New", "budgetEUR": 3000.0, "budgetLocal": 3000.0, "budgetLocalCurrency": "\u20ac", "opps": 1.0, "note": null, "removed": false}, {"channel": "Co-marketing events", "item": "Partner Roundtables EU-DE2 Q3", "territory": "EU-DE2", "fy": "FY28", "fyQtr": "FY28-Q3", "status": "New", "budgetEUR": 3000.0, "budgetLocal": 3000.0, "budgetLocalCurrency": "\u20ac", "opps": 1.0, "note": null, "removed": false}, {"channel": "Co-marketing events", "item": "Other Partner event (conf) Q1", "territory": "Other", "fy": "FY28", "fyQtr": null, "status": "New", "budgetEUR": null, "budgetLocal": null, "budgetLocalCurrency": null, "opps": null, "note": null, "removed": false}, {"channel": "Co-marketing events", "item": "Other Partner event (conf) Q2", "territory": "Other", "fy": "FY28", "fyQtr": null, "status": "New", "budgetEUR": null, "budgetLocal": null, "budgetLocalCurrency": null, "opps": null, "note": null, "removed": false}, {"channel": "Co-marketing events", "item": "Other Partner event (conf) Q3", "territory": "Other", "fy": "FY28", "fyQtr": null, "status": "New", "budgetEUR": null, "budgetLocal": null, "budgetLocalCurrency": null, "opps": null, "note": null, "removed": false}, {"channel": "Online events", "item": "Webinar series SSON X2 (12.5K ea) - Oct US", "territory": "US", "fy": "FY27", "fyQtr": "FY27-Q3", "status": "New", "budgetEUR": 9500.0, "budgetLocal": 12500.0, "budgetLocalCurrency": "$", "opps": 1.0, "note": null, "removed": false}, {"channel": "Online events", "item": "Webinar series SSON X2 (12.5K ea) - Dec EU South", "territory": "EU-France", "fy": "FY27", "fyQtr": "FY27-Q4", "status": null, "budgetEUR": 9500.0, "budgetLocal": 12500.0, "budgetLocalCurrency": "$", "opps": 1.0, "note": null, "removed": false}, {"channel": "Online events", "item": "Webinar series SSON (12.5K ea) US Q1", "territory": "US", "fy": "FY28", "fyQtr": "FY28-Q1", "status": "Same", "budgetEUR": 9500.0, "budgetLocal": 12500.0, "budgetLocalCurrency": "$", "opps": 1.0, "note": null, "removed": false}, {"channel": "Online events", "item": "Webinar series SSON (12.5K ea) DE Q1", "territory": "Other", "fy": "FY28", "fyQtr": "FY28-Q1", "status": "Same", "budgetEUR": 9500.0, "budgetLocal": 12500.0, "budgetLocalCurrency": "$", "opps": 1.0, "note": null, "removed": false}, {"channel": "Online events", "item": "Webinar series SSON (12.5K ea) Nordics Q2", "territory": "EU-Nordics", "fy": "FY28", "fyQtr": "FY28-Q2", "status": "Same", "budgetEUR": 9500.0, "budgetLocal": 12500.0, "budgetLocalCurrency": "$", "opps": 1.0, "note": null, "removed": false}, {"channel": "Online events", "item": "Webinar series SSON (12.5K ea) Central Q2", "territory": "EU-SWIAUS", "fy": "FY28", "fyQtr": "FY28-Q2", "status": "Same", "budgetEUR": 9500.0, "budgetLocal": 12500.0, "budgetLocalCurrency": "$", "opps": 1.0, "note": null, "removed": false}, {"channel": "Online events", "item": "Webinar series SSON (12.5K ea) US Q3", "territory": "US", "fy": "FY28", "fyQtr": "FY28-Q3", "status": "Same", "budgetEUR": 9500.0, "budgetLocal": 12500.0, "budgetLocalCurrency": "$", "opps": 1.0, "note": null, "removed": false}, {"channel": "Analyst", "item": "Gartner", "territory": null, "fy": "FY28", "fyQtr": null, "status": "Same", "budgetEUR": 129000.0, "budgetLocal": 129000.0, "budgetLocalCurrency": "\u20ac", "opps": null, "note": null, "removed": false}, {"channel": "Digital", "item": "ABX US Q1", "territory": "US", "fy": "FY28", "fyQtr": "FY28-Q1", "status": "New", "budgetEUR": 3800.0, "budgetLocal": 5000.0, "budgetLocalCurrency": "$", "opps": 1.0, "note": null, "removed": false}, {"channel": "Digital", "item": "ABX US Q2", "territory": "US", "fy": "FY28", "fyQtr": "FY28-Q2", "status": "New", "budgetEUR": 3800.0, "budgetLocal": 5000.0, "budgetLocalCurrency": "$", "opps": 1.0, "note": null, "removed": false}, {"channel": "Digital", "item": "ABX US Q3", "territory": "US", "fy": "FY28", "fyQtr": "FY28-Q3", "status": "New", "budgetEUR": 3800.0, "budgetLocal": 5000.0, "budgetLocalCurrency": "$", "opps": 1.0, "note": null, "removed": false}, {"channel": "Digital", "item": "ABX EU-South Q1", "territory": "EU-France", "fy": "FY28", "fyQtr": "FY28-Q1", "status": "New", "budgetEUR": 5000.0, "budgetLocal": 5000.0, "budgetLocalCurrency": "\u20ac", "opps": 1.0, "note": null, "removed": false}, {"channel": "Digital", "item": "ABX EU-South Q2", "territory": "EU-France", "fy": "FY28", "fyQtr": "FY28-Q2", "status": "New", "budgetEUR": 5000.0, "budgetLocal": 5000.0, "budgetLocalCurrency": "\u20ac", "opps": 1.0, "note": null, "removed": false}, {"channel": "Digital", "item": "ABX EU-South Q3", "territory": "EU-France", "fy": "FY28", "fyQtr": "FY28-Q3", "status": "New", "budgetEUR": 5000.0, "budgetLocal": 5000.0, "budgetLocalCurrency": "\u20ac", "opps": 1.0, "note": null, "removed": false}, {"channel": "Digital", "item": "ABX EU-UK Q1", "territory": "EU-UK", "fy": "FY28", "fyQtr": "FY28-Q1", "status": "New", "budgetEUR": 5000.0, "budgetLocal": 5000.0, "budgetLocalCurrency": "\u20ac", "opps": 1.0, "note": null, "removed": false}, {"channel": "Digital", "item": "ABX EU-UK Q2", "territory": "EU-UK", "fy": "FY28", "fyQtr": "FY28-Q2", "status": "New", "budgetEUR": 5000.0, "budgetLocal": 5000.0, "budgetLocalCurrency": "\u20ac", "opps": 1.0, "note": null, "removed": false}, {"channel": "Digital", "item": "ABX EU-UK Q3", "territory": "EU-UK", "fy": "FY28", "fyQtr": "FY28-Q3", "status": "New", "budgetEUR": 5000.0, "budgetLocal": 5000.0, "budgetLocalCurrency": "\u20ac", "opps": 1.0, "note": null, "removed": false}, {"channel": "Digital", "item": "ABX EU-Central Q1", "territory": "EU-SWIAUS", "fy": "FY28", "fyQtr": "FY28-Q1", "status": "New", "budgetEUR": 5000.0, "budgetLocal": 5000.0, "budgetLocalCurrency": "\u20ac", "opps": 1.0, "note": null, "removed": false}, {"channel": "Digital", "item": "ABX EU-Central Q2", "territory": "EU-SWIAUS", "fy": "FY28", "fyQtr": "FY28-Q2", "status": "New", "budgetEUR": 5000.0, "budgetLocal": 5000.0, "budgetLocalCurrency": "\u20ac", "opps": 1.0, "note": null, "removed": false}, {"channel": "Digital", "item": "ABX EU-Central Q3", "territory": "EU-SWIAUS", "fy": "FY28", "fyQtr": "FY28-Q3", "status": "New", "budgetEUR": 5000.0, "budgetLocal": 5000.0, "budgetLocalCurrency": "\u20ac", "opps": 1.0, "note": null, "removed": false}, {"channel": "Digital", "item": "ABX EU-Nordics Q1", "territory": "EU-Nordics", "fy": "FY28", "fyQtr": "FY28-Q1", "status": "New", "budgetEUR": 5000.0, "budgetLocal": 5000.0, "budgetLocalCurrency": "\u20ac", "opps": 1.0, "note": null, "removed": false}, {"channel": "Digital", "item": "ABX EU-Nordics Q2", "territory": "EU-Nordics", "fy": "FY28", "fyQtr": "FY28-Q2", "status": "New", "budgetEUR": 5000.0, "budgetLocal": 5000.0, "budgetLocalCurrency": "\u20ac", "opps": 1.0, "note": null, "removed": false}, {"channel": "Digital", "item": "ABX EU-Nordics Q3", "territory": "EU-Nordics", "fy": "FY28", "fyQtr": "FY28-Q3", "status": "New", "budgetEUR": 5000.0, "budgetLocal": 5000.0, "budgetLocalCurrency": "\u20ac", "opps": 1.0, "note": null, "removed": false}, {"channel": "Digital", "item": "ABX EU-DE1 Q1", "territory": "EU-DE1", "fy": "FY28", "fyQtr": "FY28-Q1", "status": "New", "budgetEUR": 5000.0, "budgetLocal": 5000.0, "budgetLocalCurrency": "\u20ac", "opps": 1.0, "note": null, "removed": false}, {"channel": "Digital", "item": "ABX EU-DE1 Q2", "territory": "EU-DE1", "fy": "FY28", "fyQtr": "FY28-Q2", "status": "New", "budgetEUR": 5000.0, "budgetLocal": 5000.0, "budgetLocalCurrency": "\u20ac", "opps": 1.0, "note": null, "removed": false}, {"channel": "Digital", "item": "ABX EU-DE1 Q3", "territory": "EU-DE1", "fy": "FY28", "fyQtr": "FY28-Q3", "status": "New", "budgetEUR": 5000.0, "budgetLocal": 5000.0, "budgetLocalCurrency": "\u20ac", "opps": 1.0, "note": null, "removed": false}, {"channel": "Digital", "item": "ABX EU-DE2 Q1", "territory": "EU-DE2", "fy": "FY28", "fyQtr": "FY28-Q1", "status": "New", "budgetEUR": 5000.0, "budgetLocal": 5000.0, "budgetLocalCurrency": "\u20ac", "opps": 1.0, "note": null, "removed": false}, {"channel": "Digital", "item": "ABX EU-DE2 Q2", "territory": "EU-DE2", "fy": "FY28", "fyQtr": "FY28-Q2", "status": "New", "budgetEUR": 5000.0, "budgetLocal": 5000.0, "budgetLocalCurrency": "\u20ac", "opps": 1.0, "note": null, "removed": false}, {"channel": "Digital", "item": "ABX EU-DE2 Q3", "territory": "EU-DE2", "fy": "FY28", "fyQtr": "FY28-Q3", "status": "New", "budgetEUR": 5000.0, "budgetLocal": 5000.0, "budgetLocalCurrency": "\u20ac", "opps": 1.0, "note": null, "removed": false}, {"channel": "Organic", "item": "Organic Search - DE1 - Q1", "territory": "EU-DE1", "fy": "FY28", "fyQtr": "FY28-Q1", "status": null, "budgetEUR": null, "budgetLocal": null, "budgetLocalCurrency": null, "opps": 1.0, "note": null, "removed": false}, {"channel": "Organic", "item": "Organic Search - DE1 - Q2", "territory": "EU-DE1", "fy": "FY28", "fyQtr": "FY28-Q2", "status": null, "budgetEUR": null, "budgetLocal": null, "budgetLocalCurrency": null, "opps": 1.0, "note": null, "removed": false}, {"channel": "Organic", "item": "Organic Search - DE1 - Q3", "territory": "EU-DE1", "fy": "FY28", "fyQtr": "FY28-Q3", "status": null, "budgetEUR": null, "budgetLocal": null, "budgetLocalCurrency": null, "opps": 1.0, "note": null, "removed": false}, {"channel": "Organic", "item": "Organic Search - DE1 - Q4", "territory": "EU-DE1", "fy": "FY28", "fyQtr": "FY28-Q4", "status": null, "budgetEUR": null, "budgetLocal": null, "budgetLocalCurrency": null, "opps": 1.0, "note": null, "removed": false}, {"channel": "Organic", "item": "Organic Search - DE2 - Q1", "territory": "EU-DE2", "fy": "FY28", "fyQtr": "FY28-Q1", "status": null, "budgetEUR": null, "budgetLocal": null, "budgetLocalCurrency": null, "opps": 1.0, "note": null, "removed": false}, {"channel": "Organic", "item": "Organic Search - DE2 - Q2", "territory": "EU-DE2", "fy": "FY28", "fyQtr": "FY28-Q2", "status": null, "budgetEUR": null, "budgetLocal": null, "budgetLocalCurrency": null, "opps": 1.0, "note": null, "removed": false}, {"channel": "Organic", "item": "Organic Search - DE2 - Q3", "territory": "EU-DE2", "fy": "FY28", "fyQtr": "FY28-Q3", "status": null, "budgetEUR": null, "budgetLocal": null, "budgetLocalCurrency": null, "opps": 1.0, "note": null, "removed": false}, {"channel": "Organic", "item": "Organic Search - DE2 - Q4", "territory": "EU-DE2", "fy": "FY28", "fyQtr": "FY28-Q4", "status": null, "budgetEUR": null, "budgetLocal": null, "budgetLocalCurrency": null, "opps": 1.0, "note": null, "removed": false}, {"channel": "Organic", "item": "Organic Search - SWIAUS - Q1", "territory": "EU-SWIAUS", "fy": "FY28", "fyQtr": "FY28-Q1", "status": null, "budgetEUR": null, "budgetLocal": null, "budgetLocalCurrency": null, "opps": 1.0, "note": null, "removed": false}, {"channel": "Organic", "item": "Organic Search - SWIAUS - Q2", "territory": "EU-SWIAUS", "fy": "FY28", "fyQtr": "FY28-Q2", "status": null, "budgetEUR": null, "budgetLocal": null, "budgetLocalCurrency": null, "opps": 1.0, "note": null, "removed": false}, {"channel": "Organic", "item": "Organic Search - SWIAUS - Q3", "territory": "EU-SWIAUS", "fy": "FY28", "fyQtr": "FY28-Q3", "status": null, "budgetEUR": null, "budgetLocal": null, "budgetLocalCurrency": null, "opps": 1.0, "note": null, "removed": false}, {"channel": "Organic", "item": "Organic Search - SWIAUS - Q4", "territory": "EU-SWIAUS", "fy": "FY28", "fyQtr": "FY28-Q4", "status": null, "budgetEUR": null, "budgetLocal": null, "budgetLocalCurrency": null, "opps": 1.0, "note": null, "removed": false}, {"channel": "AI search", "item": "AI Search vendor Remainder of FY27", "territory": "US", "fy": "FY27", "fyQtr": "FY27-Q4", "status": "New", "budgetEUR": 21280.0, "budgetLocal": 28000.0, "budgetLocalCurrency": "$", "opps": 1.0, "note": null, "removed": false}, {"channel": "AI search", "item": "AI Search vendor FY28 Q1", "territory": "US", "fy": "FY28", "fyQtr": "FY28-Q1", "status": "New", "budgetEUR": 15200.0, "budgetLocal": 20000.0, "budgetLocalCurrency": "$", "opps": 1.0, "note": null, "removed": false}, {"channel": "AI search", "item": "AI Search vendor FY28 Q2", "territory": "US", "fy": "FY28", "fyQtr": "FY28-Q2", "status": "New", "budgetEUR": 15200.0, "budgetLocal": 20000.0, "budgetLocalCurrency": "$", "opps": 1.0, "note": null, "removed": false}]};const TERR_COLOR_VAR = {
+const FALLBACK_DATA = {"quarters": ["FY27-Q2", "FY27-Q3", "FY27-Q4", "FY28-Q1", "FY28-Q2", "FY28-Q3", "FY28-Q4"], "territories": ["US", "EU-France", "EU-UK", "EU-SWIAUS", "EU-Nordics", "EU-DE1", "EU-DE2", "Other"], "spend_by_terr_qtr": {"US": [13300, 43700, 21280, 112100, 66880, 51680, 22800], "EU-France": [0, 0, 9500, 8000, 31342, 8000, 0], "EU-UK": [0, 0, 0, 8000, 8000, 8000, 0], "EU-SWIAUS": [0, 0, 0, 8000, 17500, 8000, 15000], "EU-Nordics": [0, 0, 0, 8000, 17500, 64000, 0], "EU-DE1": [0, 0, 0, 8000, 8000, 8000, 0], "EU-DE2": [0, 0, 0, 8000, 8000, 8000, 0], "Other": [0, 0, 0, 9500, 5000, 22200, 32000]}, "opps_by_terr_qtr": {"US": [2, 4, 1, 13, 7, 7, 2], "EU-France": [0, 0, 1, 2, 6, 2, 0], "EU-UK": [0, 0, 0, 2, 2, 2, 0], "EU-SWIAUS": [0, 0, 0, 3, 4, 3, 2], "EU-Nordics": [0, 0, 0, 2, 3, 8, 0], "EU-DE1": [0, 0, 0, 3, 3, 3, 1], "EU-DE2": [0, 0, 0, 3, 3, 3, 1], "Other": [0, 0, 0, 1, 2, 4, 4]}, "spend_total_by_terr": {"US": 336300, "EU-France": 56842, "EU-UK": 24000, "EU-SWIAUS": 48500, "EU-Nordics": 89500, "EU-DE1": 24000, "EU-DE2": 24000, "Other": 68700}, "opps_total_by_terr": {"US": 37.5, "EU-France": 11, "EU-UK": 6, "EU-SWIAUS": 12, "EU-Nordics": 13, "EU-DE1": 10, "EU-DE2": 10, "Other": 11}, "channels": ["Conferences", "Co-marketing events", "Digital", "Organic", "Online events", "AI search", "User events (ASUG)"], "opps_by_channel_terr": {"Conferences": {"US": 24, "EU-France": 4, "EU-UK": 0, "EU-SWIAUS": 1, "EU-Nordics": 6, "EU-DE1": 0, "EU-DE2": 0, "Other": 9}, "Co-marketing events": {"US": 3, "EU-France": 3, "EU-UK": 3, "EU-SWIAUS": 3, "EU-Nordics": 3, "EU-DE1": 3, "EU-DE2": 3, "Other": 1}, "Digital": {"US": 3, "EU-France": 3, "EU-UK": 3, "EU-SWIAUS": 3, "EU-Nordics": 3, "EU-DE1": 3, "EU-DE2": 3, "Other": 0}, "Organic": {"US": 0, "EU-France": 0, "EU-UK": 0, "EU-SWIAUS": 4, "EU-Nordics": 0, "EU-DE1": 4, "EU-DE2": 4, "Other": 0}, "Online events": {"US": 3, "EU-France": 1, "EU-UK": 0, "EU-SWIAUS": 1, "EU-Nordics": 1, "EU-DE1": 0, "EU-DE2": 0, "Other": 1}, "AI search": {"US": 3, "EU-France": 0, "EU-UK": 0, "EU-SWIAUS": 0, "EU-Nordics": 0, "EU-DE1": 0, "EU-DE2": 0, "Other": 0}, "User events (ASUG)": {"US": 1.5, "EU-France": 0, "EU-UK": 0, "EU-SWIAUS": 0, "EU-Nordics": 0, "EU-DE1": 0, "EU-DE2": 0, "Other": 0}}, "meta": {"total_spend_all": 800842, "untagged_budget": 129000, "total_opps_tagged": 110.5, "line_items": 73}, "channel_order": ["Conferences", "User events (ASUG)", "Co-marketing events", "Online events", "Analyst", "Digital", "Organic", "AI search"], "line_items": [{"channel": "Conferences", "item": "10-SSOW LATAM Mexico City 2026", "territory": "US", "fy": "FY27", "fyQtr": "FY27-Q2", "status": "New", "budgetEUR": 13300.0, "budgetLocal": 17500.0, "budgetLocalCurrency": "$", "opps": 2.0, "note": "3 passes, updated pricing", "removed": false}, {"channel": "Conferences", "item": "11-Millennium CFO Alliance Austin 2026", "territory": "US", "fy": "FY27", "fyQtr": "FY27-Q3", "status": "New", "budgetEUR": 34200.0, "budgetLocal": 45000.0, "budgetLocalCurrency": "$", "opps": 3.0, "note": "would be heavily negotiated", "removed": false}, {"channel": "Conferences", "item": "02-Millennium CFO Alliance Houston 2026", "territory": "US", "fy": "FY28", "fyQtr": "FY28-Q1", "status": "New", "budgetEUR": 34200.0, "budgetLocal": 45000.0, "budgetLocalCurrency": "$", "opps": 3.0, "note": "would be heavily negotiated", "removed": false}, {"channel": "Conferences", "item": "03-SSOW US  Orlando 2027", "territory": "US", "fy": "FY28", "fyQtr": "FY28-Q1", "status": "New", "budgetEUR": 24320.0, "budgetLocal": 32000.0, "budgetLocalCurrency": "$", "opps": 3.0, "note": "Last yr price", "removed": false}, {"channel": "Conferences", "item": "03-GBS Select Mtgs Orlando 2027", "territory": "US", "fy": "FY28", "fyQtr": "FY28-Q1", "status": "Same", "budgetEUR": 22800.0, "budgetLocal": 30000.0, "budgetLocalCurrency": "$", "opps": 3.0, "note": "Last yr price", "removed": false}, {"channel": "Conferences", "item": "05-Gartner CFO Symposium US", "territory": "US", "fy": null, "fyQtr": null, "status": "REMOVE", "budgetEUR": null, "budgetLocal": null, "budgetLocalCurrency": null, "opps": null, "note": null, "removed": true}, {"channel": "Conferences", "item": "05-Gartner CFO Symposium UK", "territory": "US", "fy": null, "fyQtr": null, "status": "REMOVE", "budgetEUR": null, "budgetLocal": null, "budgetLocalCurrency": null, "opps": null, "note": null, "removed": true}, {"channel": "Conferences", "item": "05-SSOW Europe Libson 2027", "territory": "EU-France", "fy": "FY28", "fyQtr": "FY28-Q2", "status": "Same", "budgetEUR": 23342.0, "budgetLocal": 19950.0, "budgetLocalCurrency": "\u00a3", "opps": 4.0, "note": "Last yr price", "removed": false}, {"channel": "Conferences", "item": "06-CFO Select Mtgs Atlanta 2027", "territory": "US", "fy": "FY28", "fyQtr": "FY28-Q2", "status": "Same", "budgetEUR": 22800.0, "budgetLocal": 30000.0, "budgetLocalCurrency": "$", "opps": 2.0, "note": "Last yr price", "removed": false}, {"channel": "Conferences", "item": "07-ABSL Forum DACH 2027.", "territory": "Other", "fy": "FY28", "fyQtr": "FY28-Q2", "status": "Same", "budgetEUR": 5000.0, "budgetLocal": 5000.0, "budgetLocalCurrency": "\u20ac", "opps": 2.0, "note": "Last yr price", "removed": false}, {"channel": "Conferences", "item": "09-SSOW San Diego 2027", "territory": "US", "fy": "FY28", "fyQtr": "FY28-Q2", "status": "New", "budgetEUR": 22800.0, "budgetLocal": 30000.0, "budgetLocalCurrency": "$", "opps": 2.0, "note": "Estimated price", "removed": false}, {"channel": "Conferences", "item": "09-GBS Select Mtgs San Diego 2027", "territory": "US", "fy": "FY28", "fyQtr": "FY28-Q3", "status": "Same", "budgetEUR": 22800.0, "budgetLocal": 30000.0, "budgetLocalCurrency": "$", "opps": 2.0, "note": "Last yr price", "removed": false}, {"channel": "Conferences", "item": "09-Accounting Summit DE 2027", "territory": "Other", "fy": "FY28", "fyQtr": "FY28-Q3", "status": "Same", "budgetEUR": 15000.0, "budgetLocal": 15000.0, "budgetLocalCurrency": "\u20ac", "opps": 3.0, "note": "Last yr price", "removed": false}, {"channel": "Conferences", "item": "10-SSOW Autumn Amsterdam 2027", "territory": "EU-Nordics", "fy": "FY28", "fyQtr": "FY28-Q3", "status": "New", "budgetEUR": 28000.0, "budgetLocal": 28000.0, "budgetLocalCurrency": "\u20ac", "opps": 3.0, "note": "Estimated price", "removed": false}, {"channel": "Conferences", "item": "10-CFO Exchange Amsterdam Mtgs 2027", "territory": "EU-Nordics", "fy": "FY28", "fyQtr": "FY28-Q3", "status": "New", "budgetEUR": 28000.0, "budgetLocal": 28000.0, "budgetLocalCurrency": "\u20ac", "opps": 3.0, "note": "Estimated price", "removed": false}, {"channel": "Conferences", "item": "10-SSOW LATAM Mexico City 2027", "territory": "US", "fy": "FY28", "fyQtr": "FY28-Q3", "status": "New", "budgetEUR": 13300.0, "budgetLocal": 17500.0, "budgetLocalCurrency": "$", "opps": 2.0, "note": "Quoted price this year", "removed": false}, {"channel": "Conferences", "item": "11-CFO Select Mtgs 2027 Miami 2027", "territory": "US", "fy": "FY28", "fyQtr": "FY28-Q4", "status": "Same", "budgetEUR": 22800.0, "budgetLocal": 30000.0, "budgetLocalCurrency": "$", "opps": 2.0, "note": "Last yr price", "removed": false}, {"channel": "Conferences", "item": "11-SSOW Berlin 2027", "territory": "Other", "fy": "FY28", "fyQtr": "FY28-Q4", "status": "Same", "budgetEUR": 32000.0, "budgetLocal": 32000.0, "budgetLocalCurrency": "\u20ac", "opps": 4.0, "note": "Last yr price", "removed": false}, {"channel": "Conferences", "item": "11-Austria CFO Day 2027", "territory": "EU-SWIAUS", "fy": "FY28", "fyQtr": "FY28-Q4", "status": "New", "budgetEUR": 15000.0, "budgetLocal": 15000.0, "budgetLocalCurrency": "\u20ac", "opps": 1.0, "note": "What was price?", "removed": false}, {"channel": "User events (ASUG)", "item": "Events for 2026 Q3 (x1)", "territory": "US", "fy": "FY27", "fyQtr": null, "status": "New", "budgetEUR": 1520.0, "budgetLocal": 2000.0, "budgetLocalCurrency": "$", "opps": 0.5, "note": "Estimate", "removed": false}, {"channel": "User events (ASUG)", "item": "Events for 2026 Q4 (x2)", "territory": "US", "fy": "FY27", "fyQtr": null, "status": "New", "budgetEUR": 3040.0, "budgetLocal": 4000.0, "budgetLocalCurrency": "$", "opps": 1.0, "note": "Estimate", "removed": false}, {"channel": "Co-marketing events", "item": "09-MasterClass Acctg Summit - 2 partners", "territory": "Other", "fy": "FY28", "fyQtr": "FY28-Q3", "status": "Same", "budgetEUR": 7200.0, "budgetLocal": 7200.0, "budgetLocalCurrency": "\u20ac", "opps": 1.0, "note": null, "removed": false}, {"channel": "Co-marketing events", "item": "Partner Roundtables US Q1", "territory": "US", "fy": "FY28", "fyQtr": "FY28-Q1", "status": "New", "budgetEUR": 2280.0, "budgetLocal": 3000.0, "budgetLocalCurrency": "$", "opps": 1.0, "note": null, "removed": false}, {"channel": "Co-marketing events", "item": "Partner Roundtables US Q2", "territory": "US", "fy": "FY28", "fyQtr": "FY28-Q2", "status": "New", "budgetEUR": 2280.0, "budgetLocal": 3000.0, "budgetLocalCurrency": "$", "opps": 1.0, "note": null, "removed": false}, {"channel": "Co-marketing events", "item": "Partner Roundtables US Q3", "territory": "US", "fy": "FY28", "fyQtr": "FY28-Q3", "status": "New", "budgetEUR": 2280.0, "budgetLocal": 3000.0, "budgetLocalCurrency": "$", "opps": 1.0, "note": null, "removed": false}, {"channel": "Co-marketing events", "item": "Partner Roundtables EU-South Q1", "territory": "EU-France", "fy": "FY28", "fyQtr": "FY28-Q1", "status": "New", "budgetEUR": 3000.0, "budgetLocal": 3000.0, "budgetLocalCurrency": "\u20ac", "opps": 1.0, "note": null, "removed": false}, {"channel": "Co-marketing events", "item": "Partner Roundtables EU-South Q2", "territory": "EU-France", "fy": "FY28", "fyQtr": "FY28-Q2", "status": "New", "budgetEUR": 3000.0, "budgetLocal": 3000.0, "budgetLocalCurrency": "\u20ac", "opps": 1.0, "note": null, "removed": false}, {"channel": "Co-marketing events", "item": "Partner Roundtables EU-South Q3", "territory": "EU-France", "fy": "FY28", "fyQtr": "FY28-Q3", "status": "New", "budgetEUR": 3000.0, "budgetLocal": 3000.0, "budgetLocalCurrency": "\u20ac", "opps": 1.0, "note": null, "removed": false}, {"channel": "Co-marketing events", "item": "Partner Roundtables EU-UK Q1", "territory": "EU-UK", "fy": "FY28", "fyQtr": "FY28-Q1", "status": "New", "budgetEUR": 3000.0, "budgetLocal": 3000.0, "budgetLocalCurrency": "\u20ac", "opps": 1.0, "note": null, "removed": false}, {"channel": "Co-marketing events", "item": "Partner Roundtables EU-UK Q2", "territory": "EU-UK", "fy": "FY28", "fyQtr": "FY28-Q2", "status": "New", "budgetEUR": 3000.0, "budgetLocal": 3000.0, "budgetLocalCurrency": "\u20ac", "opps": 1.0, "note": null, "removed": false}, {"channel": "Co-marketing events", "item": "Partner Roundtables EU-UK Q3", "territory": "EU-UK", "fy": "FY28", "fyQtr": "FY28-Q3", "status": "New", "budgetEUR": 3000.0, "budgetLocal": 3000.0, "budgetLocalCurrency": "\u20ac", "opps": 1.0, "note": null, "removed": false}, {"channel": "Co-marketing events", "item": "Partner Roundtables EU-Central Q1", "territory": "EU-SWIAUS", "fy": "FY28", "fyQtr": "FY28-Q1", "status": "New", "budgetEUR": 3000.0, "budgetLocal": 3000.0, "budgetLocalCurrency": "\u20ac", "opps": 1.0, "note": null, "removed": false}, {"channel": "Co-marketing events", "item": "Partner Roundtables EU-Central Q2", "territory": "EU-SWIAUS", "fy": "FY28", "fyQtr": "FY28-Q2", "status": "New", "budgetEUR": 3000.0, "budgetLocal": 3000.0, "budgetLocalCurrency": "\u20ac", "opps": 1.0, "note": null, "removed": false}, {"channel": "Co-marketing events", "item": "Partner Roundtables EU-Central Q3", "territory": "EU-SWIAUS", "fy": "FY28", "fyQtr": "FY28-Q3", "status": "New", "budgetEUR": 3000.0, "budgetLocal": 3000.0, "budgetLocalCurrency": "\u20ac", "opps": 1.0, "note": null, "removed": false}, {"channel": "Co-marketing events", "item": "Partner Roundtables EU-Nordics Q1", "territory": "EU-Nordics", "fy": "FY28", "fyQtr": "FY28-Q1", "status": "New", "budgetEUR": 3000.0, "budgetLocal": 3000.0, "budgetLocalCurrency": "\u20ac", "opps": 1.0, "note": null, "removed": false}, {"channel": "Co-marketing events", "item": "Partner Roundtables EU-Nordics Q2", "territory": "EU-Nordics", "fy": "FY28", "fyQtr": "FY28-Q2", "status": "New", "budgetEUR": 3000.0, "budgetLocal": 3000.0, "budgetLocalCurrency": "\u20ac", "opps": 1.0, "note": null, "removed": false}, {"channel": "Co-marketing events", "item": "Partner Roundtables EU-Nordics Q3", "territory": "EU-Nordics", "fy": "FY28", "fyQtr": "FY28-Q3", "status": "New", "budgetEUR": 3000.0, "budgetLocal": 3000.0, "budgetLocalCurrency": "\u20ac", "opps": 1.0, "note": null, "removed": false}, {"channel": "Co-marketing events", "item": "Partner Roundtables EU-DE1 Q1", "territory": "EU-DE1", "fy": "FY28", "fyQtr": "FY28-Q1", "status": "New", "budgetEUR": 3000.0, "budgetLocal": 3000.0, "budgetLocalCurrency": "\u20ac", "opps": 1.0, "note": null, "removed": false}, {"channel": "Co-marketing events", "item": "Partner Roundtables EU-DE1 Q2", "territory": "EU-DE1", "fy": "FY28", "fyQtr": "FY28-Q2", "status": "New", "budgetEUR": 3000.0, "budgetLocal": 3000.0, "budgetLocalCurrency": "\u20ac", "opps": 1.0, "note": null, "removed": false}, {"channel": "Co-marketing events", "item": "Partner Roundtables EU-DE1 Q3", "territory": "EU-DE1", "fy": "FY28", "fyQtr": "FY28-Q3", "status": "New", "budgetEUR": 3000.0, "budgetLocal": 3000.0, "budgetLocalCurrency": "\u20ac", "opps": 1.0, "note": null, "removed": false}, {"channel": "Co-marketing events", "item": "Partner Roundtables EU-DE2 Q1", "territory": "EU-DE2", "fy": "FY28", "fyQtr": "FY28-Q1", "status": "New", "budgetEUR": 3000.0, "budgetLocal": 3000.0, "budgetLocalCurrency": "\u20ac", "opps": 1.0, "note": null, "removed": false}, {"channel": "Co-marketing events", "item": "Partner Roundtables EU-DE2 Q2", "territory": "EU-DE2", "fy": "FY28", "fyQtr": "FY28-Q2", "status": "New", "budgetEUR": 3000.0, "budgetLocal": 3000.0, "budgetLocalCurrency": "\u20ac", "opps": 1.0, "note": null, "removed": false}, {"channel": "Co-marketing events", "item": "Partner Roundtables EU-DE2 Q3", "territory": "EU-DE2", "fy": "FY28", "fyQtr": "FY28-Q3", "status": "New", "budgetEUR": 3000.0, "budgetLocal": 3000.0, "budgetLocalCurrency": "\u20ac", "opps": 1.0, "note": null, "removed": false}, {"channel": "Co-marketing events", "item": "Other Partner event (conf) Q1", "territory": "Other", "fy": "FY28", "fyQtr": null, "status": "New", "budgetEUR": null, "budgetLocal": null, "budgetLocalCurrency": null, "opps": null, "note": null, "removed": false}, {"channel": "Co-marketing events", "item": "Other Partner event (conf) Q2", "territory": "Other", "fy": "FY28", "fyQtr": null, "status": "New", "budgetEUR": null, "budgetLocal": null, "budgetLocalCurrency": null, "opps": null, "note": null, "removed": false}, {"channel": "Co-marketing events", "item": "Other Partner event (conf) Q3", "territory": "Other", "fy": "FY28", "fyQtr": null, "status": "New", "budgetEUR": null, "budgetLocal": null, "budgetLocalCurrency": null, "opps": null, "note": null, "removed": false}, {"channel": "Online events", "item": "Webinar series SSON X2 (12.5K ea) - Oct US", "territory": "US", "fy": "FY27", "fyQtr": "FY27-Q3", "status": "New", "budgetEUR": 9500.0, "budgetLocal": 12500.0, "budgetLocalCurrency": "$", "opps": 1.0, "note": null, "removed": false}, {"channel": "Online events", "item": "Webinar series SSON X2 (12.5K ea) - Dec EU South", "territory": "EU-France", "fy": "FY27", "fyQtr": "FY27-Q4", "status": null, "budgetEUR": 9500.0, "budgetLocal": 12500.0, "budgetLocalCurrency": "$", "opps": 1.0, "note": null, "removed": false}, {"channel": "Online events", "item": "Webinar series SSON (12.5K ea) US Q1", "territory": "US", "fy": "FY28", "fyQtr": "FY28-Q1", "status": "Same", "budgetEUR": 9500.0, "budgetLocal": 12500.0, "budgetLocalCurrency": "$", "opps": 1.0, "note": null, "removed": false}, {"channel": "Online events", "item": "Webinar series SSON (12.5K ea) DE Q1", "territory": "Other", "fy": "FY28", "fyQtr": "FY28-Q1", "status": "Same", "budgetEUR": 9500.0, "budgetLocal": 12500.0, "budgetLocalCurrency": "$", "opps": 1.0, "note": null, "removed": false}, {"channel": "Online events", "item": "Webinar series SSON (12.5K ea) Nordics Q2", "territory": "EU-Nordics", "fy": "FY28", "fyQtr": "FY28-Q2", "status": "Same", "budgetEUR": 9500.0, "budgetLocal": 12500.0, "budgetLocalCurrency": "$", "opps": 1.0, "note": null, "removed": false}, {"channel": "Online events", "item": "Webinar series SSON (12.5K ea) Central Q2", "territory": "EU-SWIAUS", "fy": "FY28", "fyQtr": "FY28-Q2", "status": "Same", "budgetEUR": 9500.0, "budgetLocal": 12500.0, "budgetLocalCurrency": "$", "opps": 1.0, "note": null, "removed": false}, {"channel": "Online events", "item": "Webinar series SSON (12.5K ea) US Q3", "territory": "US", "fy": "FY28", "fyQtr": "FY28-Q3", "status": "Same", "budgetEUR": 9500.0, "budgetLocal": 12500.0, "budgetLocalCurrency": "$", "opps": 1.0, "note": null, "removed": false}, {"channel": "Analyst", "item": "Gartner", "territory": null, "fy": "FY28", "fyQtr": null, "status": "Same", "budgetEUR": 129000.0, "budgetLocal": 129000.0, "budgetLocalCurrency": "\u20ac", "opps": null, "note": null, "removed": false}, {"channel": "Digital", "item": "ABX US Q1", "territory": "US", "fy": "FY28", "fyQtr": "FY28-Q1", "status": "New", "budgetEUR": 3800.0, "budgetLocal": 5000.0, "budgetLocalCurrency": "$", "opps": 1.0, "note": null, "removed": false}, {"channel": "Digital", "item": "ABX US Q2", "territory": "US", "fy": "FY28", "fyQtr": "FY28-Q2", "status": "New", "budgetEUR": 3800.0, "budgetLocal": 5000.0, "budgetLocalCurrency": "$", "opps": 1.0, "note": null, "removed": false}, {"channel": "Digital", "item": "ABX US Q3", "territory": "US", "fy": "FY28", "fyQtr": "FY28-Q3", "status": "New", "budgetEUR": 3800.0, "budgetLocal": 5000.0, "budgetLocalCurrency": "$", "opps": 1.0, "note": null, "removed": false}, {"channel": "Digital", "item": "ABX EU-South Q1", "territory": "EU-France", "fy": "FY28", "fyQtr": "FY28-Q1", "status": "New", "budgetEUR": 5000.0, "budgetLocal": 5000.0, "budgetLocalCurrency": "\u20ac", "opps": 1.0, "note": null, "removed": false}, {"channel": "Digital", "item": "ABX EU-South Q2", "territory": "EU-France", "fy": "FY28", "fyQtr": "FY28-Q2", "status": "New", "budgetEUR": 5000.0, "budgetLocal": 5000.0, "budgetLocalCurrency": "\u20ac", "opps": 1.0, "note": null, "removed": false}, {"channel": "Digital", "item": "ABX EU-South Q3", "territory": "EU-France", "fy": "FY28", "fyQtr": "FY28-Q3", "status": "New", "budgetEUR": 5000.0, "budgetLocal": 5000.0, "budgetLocalCurrency": "\u20ac", "opps": 1.0, "note": null, "removed": false}, {"channel": "Digital", "item": "ABX EU-UK Q1", "territory": "EU-UK", "fy": "FY28", "fyQtr": "FY28-Q1", "status": "New", "budgetEUR": 5000.0, "budgetLocal": 5000.0, "budgetLocalCurrency": "\u20ac", "opps": 1.0, "note": null, "removed": false}, {"channel": "Digital", "item": "ABX EU-UK Q2", "territory": "EU-UK", "fy": "FY28", "fyQtr": "FY28-Q2", "status": "New", "budgetEUR": 5000.0, "budgetLocal": 5000.0, "budgetLocalCurrency": "\u20ac", "opps": 1.0, "note": null, "removed": false}, {"channel": "Digital", "item": "ABX EU-UK Q3", "territory": "EU-UK", "fy": "FY28", "fyQtr": "FY28-Q3", "status": "New", "budgetEUR": 5000.0, "budgetLocal": 5000.0, "budgetLocalCurrency": "\u20ac", "opps": 1.0, "note": null, "removed": false}, {"channel": "Digital", "item": "ABX EU-Central Q1", "territory": "EU-SWIAUS", "fy": "FY28", "fyQtr": "FY28-Q1", "status": "New", "budgetEUR": 5000.0, "budgetLocal": 5000.0, "budgetLocalCurrency": "\u20ac", "opps": 1.0, "note": null, "removed": false}, {"channel": "Digital", "item": "ABX EU-Central Q2", "territory": "EU-SWIAUS", "fy": "FY28", "fyQtr": "FY28-Q2", "status": "New", "budgetEUR": 5000.0, "budgetLocal": 5000.0, "budgetLocalCurrency": "\u20ac", "opps": 1.0, "note": null, "removed": false}, {"channel": "Digital", "item": "ABX EU-Central Q3", "territory": "EU-SWIAUS", "fy": "FY28", "fyQtr": "FY28-Q3", "status": "New", "budgetEUR": 5000.0, "budgetLocal": 5000.0, "budgetLocalCurrency": "\u20ac", "opps": 1.0, "note": null, "removed": false}, {"channel": "Digital", "item": "ABX EU-Nordics Q1", "territory": "EU-Nordics", "fy": "FY28", "fyQtr": "FY28-Q1", "status": "New", "budgetEUR": 5000.0, "budgetLocal": 5000.0, "budgetLocalCurrency": "\u20ac", "opps": 1.0, "note": null, "removed": false}, {"channel": "Digital", "item": "ABX EU-Nordics Q2", "territory": "EU-Nordics", "fy": "FY28", "fyQtr": "FY28-Q2", "status": "New", "budgetEUR": 5000.0, "budgetLocal": 5000.0, "budgetLocalCurrency": "\u20ac", "opps": 1.0, "note": null, "removed": false}, {"channel": "Digital", "item": "ABX EU-Nordics Q3", "territory": "EU-Nordics", "fy": "FY28", "fyQtr": "FY28-Q3", "status": "New", "budgetEUR": 5000.0, "budgetLocal": 5000.0, "budgetLocalCurrency": "\u20ac", "opps": 1.0, "note": null, "removed": false}, {"channel": "Digital", "item": "ABX EU-DE1 Q1", "territory": "EU-DE1", "fy": "FY28", "fyQtr": "FY28-Q1", "status": "New", "budgetEUR": 5000.0, "budgetLocal": 5000.0, "budgetLocalCurrency": "\u20ac", "opps": 1.0, "note": null, "removed": false}, {"channel": "Digital", "item": "ABX EU-DE1 Q2", "territory": "EU-DE1", "fy": "FY28", "fyQtr": "FY28-Q2", "status": "New", "budgetEUR": 5000.0, "budgetLocal": 5000.0, "budgetLocalCurrency": "\u20ac", "opps": 1.0, "note": null, "removed": false}, {"channel": "Digital", "item": "ABX EU-DE1 Q3", "territory": "EU-DE1", "fy": "FY28", "fyQtr": "FY28-Q3", "status": "New", "budgetEUR": 5000.0, "budgetLocal": 5000.0, "budgetLocalCurrency": "\u20ac", "opps": 1.0, "note": null, "removed": false}, {"channel": "Digital", "item": "ABX EU-DE2 Q1", "territory": "EU-DE2", "fy": "FY28", "fyQtr": "FY28-Q1", "status": "New", "budgetEUR": 5000.0, "budgetLocal": 5000.0, "budgetLocalCurrency": "\u20ac", "opps": 1.0, "note": null, "removed": false}, {"channel": "Digital", "item": "ABX EU-DE2 Q2", "territory": "EU-DE2", "fy": "FY28", "fyQtr": "FY28-Q2", "status": "New", "budgetEUR": 5000.0, "budgetLocal": 5000.0, "budgetLocalCurrency": "\u20ac", "opps": 1.0, "note": null, "removed": false}, {"channel": "Digital", "item": "ABX EU-DE2 Q3", "territory": "EU-DE2", "fy": "FY28", "fyQtr": "FY28-Q3", "status": "New", "budgetEUR": 5000.0, "budgetLocal": 5000.0, "budgetLocalCurrency": "\u20ac", "opps": 1.0, "note": null, "removed": false}, {"channel": "Organic", "item": "Organic Search - DE1 - Q1", "territory": "EU-DE1", "fy": "FY28", "fyQtr": "FY28-Q1", "status": null, "budgetEUR": null, "budgetLocal": null, "budgetLocalCurrency": null, "opps": 1.0, "note": null, "removed": false}, {"channel": "Organic", "item": "Organic Search - DE1 - Q2", "territory": "EU-DE1", "fy": "FY28", "fyQtr": "FY28-Q2", "status": null, "budgetEUR": null, "budgetLocal": null, "budgetLocalCurrency": null, "opps": 1.0, "note": null, "removed": false}, {"channel": "Organic", "item": "Organic Search - DE1 - Q3", "territory": "EU-DE1", "fy": "FY28", "fyQtr": "FY28-Q3", "status": null, "budgetEUR": null, "budgetLocal": null, "budgetLocalCurrency": null, "opps": 1.0, "note": null, "removed": false}, {"channel": "Organic", "item": "Organic Search - DE1 - Q4", "territory": "EU-DE1", "fy": "FY28", "fyQtr": "FY28-Q4", "status": null, "budgetEUR": null, "budgetLocal": null, "budgetLocalCurrency": null, "opps": 1.0, "note": null, "removed": false}, {"channel": "Organic", "item": "Organic Search - DE2 - Q1", "territory": "EU-DE2", "fy": "FY28", "fyQtr": "FY28-Q1", "status": null, "budgetEUR": null, "budgetLocal": null, "budgetLocalCurrency": null, "opps": 1.0, "note": null, "removed": false}, {"channel": "Organic", "item": "Organic Search - DE2 - Q2", "territory": "EU-DE2", "fy": "FY28", "fyQtr": "FY28-Q2", "status": null, "budgetEUR": null, "budgetLocal": null, "budgetLocalCurrency": null, "opps": 1.0, "note": null, "removed": false}, {"channel": "Organic", "item": "Organic Search - DE2 - Q3", "territory": "EU-DE2", "fy": "FY28", "fyQtr": "FY28-Q3", "status": null, "budgetEUR": null, "budgetLocal": null, "budgetLocalCurrency": null, "opps": 1.0, "note": null, "removed": false}, {"channel": "Organic", "item": "Organic Search - DE2 - Q4", "territory": "EU-DE2", "fy": "FY28", "fyQtr": "FY28-Q4", "status": null, "budgetEUR": null, "budgetLocal": null, "budgetLocalCurrency": null, "opps": 1.0, "note": null, "removed": false}, {"channel": "Organic", "item": "Organic Search - SWIAUS - Q1", "territory": "EU-SWIAUS", "fy": "FY28", "fyQtr": "FY28-Q1", "status": null, "budgetEUR": null, "budgetLocal": null, "budgetLocalCurrency": null, "opps": 1.0, "note": null, "removed": false}, {"channel": "Organic", "item": "Organic Search - SWIAUS - Q2", "territory": "EU-SWIAUS", "fy": "FY28", "fyQtr": "FY28-Q2", "status": null, "budgetEUR": null, "budgetLocal": null, "budgetLocalCurrency": null, "opps": 1.0, "note": null, "removed": false}, {"channel": "Organic", "item": "Organic Search - SWIAUS - Q3", "territory": "EU-SWIAUS", "fy": "FY28", "fyQtr": "FY28-Q3", "status": null, "budgetEUR": null, "budgetLocal": null, "budgetLocalCurrency": null, "opps": 1.0, "note": null, "removed": false}, {"channel": "Organic", "item": "Organic Search - SWIAUS - Q4", "territory": "EU-SWIAUS", "fy": "FY28", "fyQtr": "FY28-Q4", "status": null, "budgetEUR": null, "budgetLocal": null, "budgetLocalCurrency": null, "opps": 1.0, "note": null, "removed": false}, {"channel": "AI search", "item": "AI Search vendor Remainder of FY27", "territory": "US", "fy": "FY27", "fyQtr": "FY27-Q4", "status": "New", "budgetEUR": 21280.0, "budgetLocal": 28000.0, "budgetLocalCurrency": "$", "opps": 1.0, "note": null, "removed": false}, {"channel": "AI search", "item": "AI Search vendor FY28 Q1", "territory": "US", "fy": "FY28", "fyQtr": "FY28-Q1", "status": "New", "budgetEUR": 15200.0, "budgetLocal": 20000.0, "budgetLocalCurrency": "$", "opps": 1.0, "note": null, "removed": false}, {"channel": "AI search", "item": "AI Search vendor FY28 Q2", "territory": "US", "fy": "FY28", "fyQtr": "FY28-Q2", "status": "New", "budgetEUR": 15200.0, "budgetLocal": 20000.0, "budgetLocalCurrency": "$", "opps": 1.0, "note": null, "removed": false}]};
+// Snapshot of the "Pivot table 1" pipeline pivot (already converted to €-equivalent at the
+// ~0.76 USD->EUR rate implied by the sheet's own Budget-Local/Budget-€ pairs), matching
+// FALLBACK_DATA.quarters exactly so it slices the same way live pipeline data does.
+FALLBACK_DATA.pipeline_source = {
+  quarters: ["FY27-Q2", "FY27-Q3", "FY27-Q4", "FY28-Q1", "FY28-Q2", "FY28-Q3", "FY28-Q4"],
+  byTerr: {
+    "US": [500000, 1125000, 750000, 3250000, 2450000, 2450000, 900000], // native $, not yet FX-converted
+    "EU-France": [0, 0, 0, 500000, 2100000, 700000, 0],
+    "EU-UK": [0, 0, 0, 500000, 700000, 700000, 0],
+    "EU-SWIAUS": [0, 0, 0, 750000, 1400000, 1050000, 900000],
+    "EU-Nordics": [0, 0, 0, 500000, 1050000, 2800000, 0],
+    "EU-DE1": [0, 0, 0, 750000, 700000, 700000, 450000],
+    "EU-DE2": [0, 0, 0, 750000, 1050000, 700000, 450000],
+    "Other": [0, 0, 0, 250000, 1050000, 2100000, 1800000],
+  },
+  fxRate: 0.76,
+};
+FALLBACK_DATA.pipeline_fx_rate = 0.76;
+const TERR_COLOR_VAR = {
   'US': '--terr-US', 'EU-France': '--terr-EU-France', 'EU-UK': '--terr-EU-UK',
   'EU-SWIAUS': '--terr-EU-SWIAUS', 'EU-Nordics': '--terr-EU-Nordics',
   'EU-DE1': '--terr-EU-DE1', 'EU-DE2': '--terr-EU-DE2', 'Other': '--terr-Other'
@@ -413,6 +430,8 @@ const FALLBACK_DATA = {"quarters": ["FY27-Q2", "FY27-Q3", "FY27-Q4", "FY28-Q1", 
 
 const fmtEUR = v => '€' + Math.round(v).toLocaleString('en-US');
 const fmtEURk = v => '€' + (v/1000).toLocaleString('en-US', {maximumFractionDigits: v % 1000 === 0 ? 0 : 1}) + 'k';
+const fmtUSD = v => '$' + Math.round(v).toLocaleString('en-US');
+const fmtUSDk = v => '$' + (v/1000).toLocaleString('en-US', {maximumFractionDigits: v % 1000 === 0 ? 0 : 1}) + 'k';
 const fmtNum = v => (v % 1 === 0 ? v : v.toFixed(1)).toString();
 
 // ---------- live data pipeline ----------
@@ -420,6 +439,11 @@ const SHEET_ID = '1uYimlEb3AbTUQ_Mev2is1z_EaOqiOtwK8GFdDyk1AmQ';
 const SHEET_GID = '436189910';
 const SHEET_CSV_URL = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:csv&gid=${SHEET_GID}`;
 const SHEET_EDIT_URL = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/edit?gid=${SHEET_GID}#gid=${SHEET_GID}`;
+// Pipeline (ACV) numbers come from a pivot table the sheet owner maintains on its own tab
+// ("Pivot table 1": SUM of Pipeline, rows = Regions, columns = FY-QTR) — fetched by sheet
+// name rather than gid, since a pivot tab's gid isn't known ahead of time.
+const PIPELINE_SHEET_NAME = 'Pivot table 1';
+const PIPELINE_CSV_URL = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:csv&sheet=${encodeURIComponent(PIPELINE_SHEET_NAME)}`;
 
 const QUARTERS = ["FY27-Q2", "FY27-Q3", "FY27-Q4", "FY28-Q1", "FY28-Q2", "FY28-Q3", "FY28-Q4"];
 const TERRITORIES = ["US", "EU-France", "EU-UK", "EU-SWIAUS", "EU-Nordics", "EU-DE1", "EU-DE2", "Other"];
@@ -485,6 +509,53 @@ function parseLocalMoney(s) {
 function fmtLocal(value, currency) {
   if (value == null) return '—';
   return (currency || '') + Math.round(value).toLocaleString('en-US');
+}
+
+// Pipeline (ACV) numbers are read from the sheet owner's own pivot table ("Pivot table 1":
+// SUM of Pipeline, rows = Regions, columns = FY-QTR) rather than re-derived here, so the
+// dashboard always matches whatever the pivot says. The pivot's Regions rows use the same
+// raw, occasionally-drifted codes as the main sheet (e.g. "DE1,DE2", "EU-DE3"), so they're
+// cleaned through the same regionTerritory() used for line items; anything that doesn't
+// resolve to a single known territory (multi-region combos, drifted DE3/DE4 codes) rolls
+// up to "Other", same as the main dataset's own handling of ambiguous codes.
+//
+// The pivot's US row sums in $ and every other row sums in €. Values are kept in their
+// native currency here (US in $, everyone else in €) — conversion happens later, at
+// render time, only when the chart actually needs to stack multiple currencies together.
+// When the Territory filter isolates "US" alone, the dashboard shows the untouched $
+// figure instead; otherwise it converts US to € using the sheet's own implied FX rate —
+// the same ratio already baked into every line item's Budget-in-Local vs. Budget-€ pair
+// (e.g. $45,000 -> €34,200 implies ~0.76) — rather than a hardcoded guess.
+function deriveUsdToEurRate(lineItems) {
+  const ratios = lineItems
+    .filter(it => it.budgetLocalCurrency === '$' && it.budgetLocal > 0 && it.budgetEUR != null)
+    .map(it => it.budgetEUR / it.budgetLocal);
+  if (!ratios.length) return 0.76; // fallback if no $ line items are found to derive a live rate from
+  ratios.sort((a, b) => a - b);
+  return ratios[Math.floor(ratios.length / 2)]; // median — robust to any one-off rounding/negotiated price
+}
+function buildPipelineFromPivotRows(rows, usdToEurRate) {
+  if (!rows || !rows.length) return null;
+  const header = rows[0];
+  const qCols = [];
+  header.forEach((cell, i) => { if (/^FY\d{2}-Q\d$/i.test((cell || '').trim())) qCols.push(i); });
+  if (!qCols.length) return null;
+  const quarters = qCols.map(i => header[i].trim());
+  const byTerr = {};
+  TERRITORIES.forEach(t => { byTerr[t] = new Array(quarters.length).fill(0); });
+  for (let r = 1; r < rows.length; r++) {
+    const row = rows[r];
+    const label = (row[0] || '').trim();
+    if (!label) continue; // the pivot's "(blank)" row (items with no Regions value at all)
+    const terr = regionTerritory(label) || 'Other';
+    if (!byTerr[terr]) continue;
+    qCols.forEach((ci, qi) => {
+      const v = parseMoney(row[ci]);
+      if (v == null) return;
+      byTerr[terr][qi] += v; // native currency: $ for US, € for everyone else
+    });
+  }
+  return { quarters, byTerr, fxRate: usdToEurRate };
 }
 
 // Quote-aware CSV parser (handles quoted fields, embedded commas, escaped "" quotes, CRLF).
@@ -583,14 +654,20 @@ function deriveFY(fyQtr, budgetFY) {
 
 // Core aggregation, reusable for both the full dataset and any filtered slice of it
 // (a subset of line items, restricted to a given quarter axis and territory set).
-function aggregate(items, quarters, territories) {
+function aggregate(items, quarters, territories, pipelineSource, convertUsdToEur) {
   const active = items.filter(x => !x.removed);
   const spendByTerrQtr = {}, oppsByTerrQtr = {};
   for (const t of territories) { spendByTerrQtr[t] = new Array(quarters.length).fill(0); oppsByTerrQtr[t] = new Array(quarters.length).fill(0); }
+  // US spend uses its real native $ (budgetLocal, always $-denominated for US items) only when
+  // the caller has explicitly asked for native mode (convertUsdToEur === false, i.e. the
+  // Territory filter has isolated US alone). The unscoped call from buildDataFromRows() passes
+  // no convertUsdToEur at all (undefined), which must keep using € — that call feeds DATA.meta
+  // (topline totals shown unconditionally in € by renderSubtitle), so it must never mix currencies.
+  const spendVal = x => (x.territory === 'US' && convertUsdToEur === false) ? (x.budgetLocal || 0) : (x.budgetEUR || 0);
   for (const x of active) {
     if (territories.includes(x.territory) && quarters.includes(x.fyQtr)) {
       const qi = quarters.indexOf(x.fyQtr);
-      spendByTerrQtr[x.territory][qi] += (x.budgetEUR || 0);
+      spendByTerrQtr[x.territory][qi] += spendVal(x);
       oppsByTerrQtr[x.territory][qi] += (x.opps || 0);
     }
   }
@@ -600,7 +677,7 @@ function aggregate(items, quarters, territories) {
   for (const t of territories) { spendTotalByTerr[t] = 0; oppsTotalByTerr[t] = 0; }
   for (const x of active) {
     if (territories.includes(x.territory)) {
-      spendTotalByTerr[x.territory] += (x.budgetEUR || 0);
+      spendTotalByTerr[x.territory] += spendVal(x);
       oppsTotalByTerr[x.territory] += (x.opps || 0);
     }
   }
@@ -627,10 +704,27 @@ function aggregate(items, quarters, territories) {
   const totalOppsTagged = cleanNum(Object.values(oppsTotalByTerr).reduce((s, v) => s + v, 0));
   const lineItemsCount = active.filter(x => x.budgetEUR !== null && (territories.includes(x.territory) || x.territory === null)).length;
 
+  // Pipeline (from the sheet's own pivot table) sliced to the same quarters/territories as
+  // everything else, so it respects the global filters exactly like spend_by_terr_qtr /
+  // opps_by_terr_qtr do. US is kept in native $ unless convertUsdToEur asks for € (needed
+  // whenever more than just "US" is being plotted, so every territory shares one axis).
+  const pSrc = pipelineSource || { quarters: [], byTerr: {}, fxRate: 0.76 };
+  const pipelineByTerrQtr = {};
+  for (const t of territories) {
+    pipelineByTerrQtr[t] = quarters.map(q => {
+      const qi = pSrc.quarters.indexOf(q);
+      if (qi === -1 || !pSrc.byTerr[t]) return 0;
+      let v = pSrc.byTerr[t][qi] || 0;
+      if (t === 'US' && convertUsdToEur) v = v * (pSrc.fxRate || 0.76);
+      return cleanNum(v);
+    });
+  }
+
   return {
     spend_by_terr_qtr: spendByTerrQtr, opps_by_terr_qtr: oppsByTerrQtr,
     spend_total_by_terr: spendTotalByTerr, opps_total_by_terr: oppsTotalByTerr,
     channels, opps_by_channel_terr: oppsByChannelTerr,
+    pipeline_by_terr_qtr: pipelineByTerrQtr,
     meta: { total_spend_all: totalSpendAll, untagged_budget: untaggedBudget, total_opps_tagged: totalOppsTagged, line_items: lineItemsCount },
   };
 }
@@ -649,12 +743,24 @@ async function loadLiveData(isRetry) {
   btn.disabled = true;
   setStatus('', isRetry ? 'Refreshing…' : 'Loading…');
   try {
-    const resp = await fetch(SHEET_CSV_URL, { cache: 'no-store' });
+    const [resp, pivotResp] = await Promise.all([
+      fetch(SHEET_CSV_URL, { cache: 'no-store' }),
+      // The pivot tab is a separate fetch (by sheet name, not gid) — its own failure
+      // shouldn't take down the rest of the dashboard, so it's caught independently.
+      fetch(PIPELINE_CSV_URL, { cache: 'no-store' }).catch(() => null),
+    ]);
     if (!resp.ok) throw new Error('HTTP ' + resp.status);
     const text = await resp.text();
     const rows = parseCSV(text);
     const built = buildDataFromRows(rows);
     if (!built.line_items.length) throw new Error('no rows parsed');
+    const usdToEurRate = deriveUsdToEurRate(built.line_items);
+    let pipelineSource = null;
+    if (pivotResp && pivotResp.ok) {
+      pipelineSource = buildPipelineFromPivotRows(parseCSV(await pivotResp.text()), usdToEurRate);
+    }
+    built.pipeline_source = pipelineSource || FALLBACK_DATA.pipeline_source;
+    built.pipeline_fx_rate = usdToEurRate;
     DATA = built;
     const now = new Date();
     setStatus('live', `Live from Google Sheet · updated ${now.toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'})}`);
@@ -936,7 +1042,7 @@ function renderQuarterHeatmap(svgId, legendId, territories, quarters, seriesByTe
       if (v > 0) {
         const lab = el('text', { x: x0 + w / 2, y: y0 + h / 2 + 4, 'text-anchor': 'middle', class: 'heat-cell-label' });
         lab.setAttribute('fill', `var(${inkVar})`);
-        lab.textContent = valueFmt(v);
+        lab.textContent = valueFmt(v, t);
         svg.appendChild(lab);
       }
       const hit = el('rect', { x: x0, y: y0, width: w, height: h, class: 'hit-rect' });
@@ -947,7 +1053,7 @@ function renderQuarterHeatmap(svgId, legendId, territories, quarters, seriesByTe
         title.className = 'tt-title';
         title.textContent = `${t} · ${q}`;
         box.appendChild(title);
-        box.appendChild(ttRow(unitLabel, v > 0 ? `var(${SEQ_VARS[seqBucket(v, maxV)]})` : 'var(--grid)', v > 0 ? valueFmt(v) : 'None planned'));
+        box.appendChild(ttRow(unitLabel, v > 0 ? `var(${SEQ_VARS[seqBucket(v, maxV)]})` : 'var(--grid)', v > 0 ? valueFmt(v, t) : 'None planned'));
         showTooltip(ev.clientX, ev.clientY, box);
       });
       hit.addEventListener('mouseleave', hideTooltip);
@@ -1135,78 +1241,6 @@ function buildChannelHeatmapTable(containerId, territories, channels, matrix) {
 }
 
 // =========================================================
-// Simple bar chart (Panels C & D) — one bar per territory
-// =========================================================
-function renderSimpleBarChart(svgId, territories, values, valueFmt, axisFmt, yLabel) {
-  const svg = document.getElementById(svgId);
-  const W = 520, H = 380;
-  const M = { top: 24, right: 14, bottom: 56, left: 60 };
-  const plotW = W - M.left - M.right;
-  const plotH = H - M.top - M.bottom;
-
-  svg.innerHTML = '';
-  svg.setAttribute('viewBox', `0 0 ${W} ${H}`);
-
-  const maxV = niceMax(Math.max(...values) * 1.15);
-  const ticks = niceTicks(maxV, 4);
-
-  ticks.forEach(tv => {
-    const y = M.top + plotH - (tv / maxV) * plotH;
-    svg.appendChild(el('line', { x1: M.left, x2: W - M.right, y1: y, y2: y, class: tv === 0 ? 'baseline-line' : 'grid-line' }));
-    const t = el('text', { x: M.left - 10, y: y + 4, class: 'tick-label axis-label', 'text-anchor': 'end' });
-    t.textContent = axisFmt(tv);
-    svg.appendChild(t);
-  });
-
-  const n = territories.length;
-  const slot = plotW / n;
-  const barW = Math.min(46, slot * 0.58);
-
-  territories.forEach((t, i) => {
-    const v = values[i];
-    const cx = M.left + slot * i + slot / 2;
-    const x0 = cx - barW / 2;
-    const segH = (v / maxV) * plotH;
-    const y = M.top + plotH - segH;
-    const r = 4;
-    const h = Math.max(segH, r);
-    const path = `M ${x0} ${y + h} L ${x0} ${y + r} Q ${x0} ${y} ${x0 + r} ${y} L ${x0 + barW - r} ${y} Q ${x0 + barW} ${y} ${x0 + barW} ${y + r} L ${x0 + barW} ${y + h} Z`;
-    svg.appendChild(el('path', { d: path, fill: `var(${TERR_COLOR_VAR[t]})` }));
-
-    if (v > 0) {
-      const lab = el('text', { x: cx, y: y - 8, class: 'bar-value-label', 'text-anchor': 'middle' });
-      lab.textContent = valueFmt(v);
-      svg.appendChild(lab);
-    }
-
-    const tickY = M.top + plotH + 14;
-    const xt = el('text', {
-      x: cx, y: tickY, class: 'tick-label', 'text-anchor': 'end',
-      transform: `rotate(-32 ${cx} ${tickY})`
-    });
-    xt.textContent = t;
-    svg.appendChild(xt);
-
-    const hit = el('rect', { x: M.left + slot * i, y: M.top, width: slot, height: plotH, class: 'hit-rect' });
-    svg.appendChild(hit);
-    hit.addEventListener('mousemove', (ev) => {
-      const box = document.createElement('div');
-      const title = document.createElement('div');
-      title.className = 'tt-title';
-      title.textContent = t;
-      box.appendChild(title);
-      box.appendChild(ttRow(yLabel, `var(${TERR_COLOR_VAR[t]})`, valueFmt(v)));
-      showTooltip(ev.clientX, ev.clientY, box);
-    });
-    hit.addEventListener('mouseleave', hideTooltip);
-  });
-
-  const yl = el('text', { x: -(M.top + plotH/2), y: 14, class: 'axis-label', 'text-anchor': 'middle', transform: 'rotate(-90)' });
-  yl.textContent = yLabel;
-  svg.appendChild(yl);
-}
-
-// =========================================================
 // Table views
 // =========================================================
 function buildQuarterTable(containerId, territories, quarters, seriesByTerr, valueFmt) {
@@ -1255,44 +1289,43 @@ function buildQuarterTable(containerId, territories, quarters, seriesByTerr, val
   container.appendChild(table);
 }
 
-function buildSimpleTable(containerId, territories, values, valueFmt, colLabel) {
-  const container = document.getElementById(containerId);
-  const table = document.createElement('table');
-  table.className = 'data-table';
-  const thead = document.createElement('thead');
-  const hr = document.createElement('tr');
-  const th0 = document.createElement('th'); th0.textContent = 'Territory'; hr.appendChild(th0);
-  const th1 = document.createElement('th'); th1.textContent = colLabel; hr.appendChild(th1);
-  thead.appendChild(hr);
-  table.appendChild(thead);
-  const tbody = document.createElement('tbody');
-  territories.forEach((t, i) => {
-    const tr = document.createElement('tr');
-    const th = document.createElement('th'); th.textContent = t; th.style.textAlign = 'left'; tr.appendChild(th);
-    const td = document.createElement('td'); td.textContent = valueFmt(values[i]); tr.appendChild(td);
-    tbody.appendChild(tr);
-  });
-  table.appendChild(tbody);
-  container.innerHTML = '';
-  container.appendChild(table);
-}
-
 // =========================================================
 // Full detail table (Panel E) — master-sheet-style line items
 // =========================================================
-function buildDetailTable(containerId, channelOrder, lineItems, currencyMode) {
+function buildDetailTable(containerId, channelOrder, lineItems, currencyMode, pipelineSource, pipelineConvertUsdToEur) {
   const container = document.getElementById(containerId);
   const isLocal = currencyMode === 'LOCAL';
   const table = document.createElement('table');
   table.className = 'data-table';
 
+  // Per-item Pipeline lookup: the main sheet has no per-line-item pipeline figure, so each row's
+  // Pipeline cell is the (territory, FY-QTR) bucket total from the sheet's own pivot table (the
+  // same source Panel P uses) — meaning multiple line items sharing a territory+quarter show the
+  // same figure by design, not a unique per-item value. US shows native $ unless the caller asks
+  // for the €-converted figure (pipelineConvertUsdToEur), mirroring Panels P/B exactly.
+  const pSrc = pipelineSource || { quarters: [], byTerr: {}, fxRate: 0.76 };
+  function pipelineValueFor(it) {
+    if (!it.territory || !it.fyQtr) return null;
+    const qi = pSrc.quarters.indexOf(it.fyQtr);
+    if (qi === -1 || !pSrc.byTerr[it.territory]) return null;
+    let v = pSrc.byTerr[it.territory][qi];
+    if (v == null) return null;
+    if (it.territory === 'US' && pipelineConvertUsdToEur) v = v * (pSrc.fxRate || 0.76);
+    return v;
+  }
+  function fmtPipelineCell(it) {
+    const v = pipelineValueFor(it);
+    if (v == null) return '—';
+    return (it.territory === 'US' && !pipelineConvertUsdToEur) ? fmtUSD(v) : fmtEUR(v);
+  }
+
   const thead = document.createElement('thead');
   const hr = document.createElement('tr');
-  ['Item', 'Territory', 'FY-QTR', 'Status', isLocal ? 'Budget (Local)' : 'Budget €', 'Opps', 'Note'].forEach((label, i) => {
+  ['Item', 'Territory', 'FY-QTR', 'Status', isLocal ? 'Budget (Local)' : 'Budget €', 'Opps', 'Pipeline', 'Note'].forEach((label, i) => {
     const th = document.createElement('th');
     th.textContent = label;
     if (i === 1 || i === 2 || i === 3) th.className = 'detail-center';
-    if (i === 6) th.className = 'detail-note';
+    if (i === 7) th.className = 'detail-note';
     hr.appendChild(th);
   });
   thead.appendChild(hr);
@@ -1300,14 +1333,28 @@ function buildDetailTable(containerId, channelOrder, lineItems, currencyMode) {
 
   const tbody = document.createElement('tbody');
   let grandBudget = 0, grandOpps = 0;
-  // Subtotals and the grand total are always summed in € — "Budget (Local)" mixes $/€/£ per
-  // item and can't be added together meaningfully, so those rows stay in € with a "(€)" tag.
-  const fmtSub = (v) => isLocal ? fmtEUR(v) + ' (€)' : fmtEUR(v);
+  let allNotRemoved = [];
+  // A subtotal can be summed in one local currency only when every item feeding it shares
+  // that same currency (true for an all-US slice, since US items are all priced in $) — in
+  // that case sum and show it in $ / £ / €. The moment the group mixes currencies (e.g. US $
+  // alongside EU €), summing local figures directly would be meaningless, so that group falls
+  // back to the € total instead, tagged "(€)" so it reads as the fallback, not a real local sum.
+  function localOrEurSubtotal(items, eurSum) {
+    if (!isLocal) return fmtEUR(eurSum);
+    const currencies = new Set(items.filter(it => it.budgetLocal != null).map(it => it.budgetLocalCurrency));
+    if (currencies.size === 1) {
+      const cur = [...currencies][0];
+      const sum = items.reduce((s, it) => s + (it.budgetLocal != null ? it.budgetLocal : 0), 0);
+      return fmtLocal(sum, cur);
+    }
+    return fmtEUR(eurSum) + ' (€)';
+  }
 
   channelOrder.forEach(ch => {
     const items = lineItems.filter(it => it.channel === ch);
     if (!items.length) return;
     const notRemoved = items.filter(it => !it.removed);
+    allNotRemoved = allNotRemoved.concat(notRemoved);
     const subBudget = notRemoved.reduce((s, it) => s + (it.budgetEUR != null ? it.budgetEUR : 0), 0);
     const subOpps = notRemoved.reduce((s, it) => s + (it.opps != null ? it.opps : 0), 0);
     grandBudget += subBudget; grandOpps += subOpps;
@@ -1318,8 +1365,9 @@ function buildDetailTable(containerId, channelOrder, lineItems, currencyMode) {
     trHead.appendChild(document.createElement('td'));
     trHead.appendChild(document.createElement('td'));
     trHead.appendChild(document.createElement('td'));
-    const tdBudget = document.createElement('td'); tdBudget.textContent = fmtSub(subBudget); trHead.appendChild(tdBudget);
+    const tdBudget = document.createElement('td'); tdBudget.textContent = localOrEurSubtotal(notRemoved, subBudget); trHead.appendChild(tdBudget);
     const tdOpps = document.createElement('td'); tdOpps.textContent = fmtNum(subOpps); trHead.appendChild(tdOpps);
+    trHead.appendChild(document.createElement('td')); // Pipeline: left blank at the subtotal level — see note above buildDetailTable
     trHead.appendChild(document.createElement('td'));
     tbody.appendChild(trHead);
 
@@ -1337,6 +1385,7 @@ function buildDetailTable(containerId, channelOrder, lineItems, currencyMode) {
       tdBudget2.textContent = isLocal ? fmtLocal(it.budgetLocal, it.budgetLocalCurrency) : (it.budgetEUR != null ? fmtEUR(it.budgetEUR) : '—');
       tr.appendChild(tdBudget2);
       const tdOpps2 = document.createElement('td'); tdOpps2.textContent = it.opps != null ? fmtNum(it.opps) : '—'; tr.appendChild(tdOpps2);
+      const tdPipeline = document.createElement('td'); tdPipeline.textContent = fmtPipelineCell(it); tr.appendChild(tdPipeline);
       const tdNote = document.createElement('td'); tdNote.textContent = it.note || '—'; tdNote.className = 'detail-note'; tr.appendChild(tdNote);
       tbody.appendChild(tr);
     });
@@ -1348,8 +1397,9 @@ function buildDetailTable(containerId, channelOrder, lineItems, currencyMode) {
   trGrand.appendChild(document.createElement('td'));
   trGrand.appendChild(document.createElement('td'));
   trGrand.appendChild(document.createElement('td'));
-  const tdGB = document.createElement('td'); tdGB.textContent = fmtSub(grandBudget); trGrand.appendChild(tdGB);
+  const tdGB = document.createElement('td'); tdGB.textContent = localOrEurSubtotal(allNotRemoved, grandBudget); trGrand.appendChild(tdGB);
   const tdGO = document.createElement('td'); tdGO.textContent = fmtNum(grandOpps); trGrand.appendChild(tdGO);
+  trGrand.appendChild(document.createElement('td')); // Pipeline: left blank at the grand-total level — see note above buildDetailTable
   trGrand.appendChild(document.createElement('td'));
   tbody.appendChild(trGrand);
 
@@ -1377,20 +1427,35 @@ function draw() {
   const scopedQuarters = fyFilter === 'All' ? DATA.quarters : DATA.quarters.filter(q => q.startsWith(fyFilter));
   const scopedTerritories = terrFilter === 'All' ? DATA.territories : [terrFilter];
   const scopedItems = DATA.line_items.filter(x => fyFilter === 'All' || x.fy === fyFilter);
-  const agg = aggregate(scopedItems, scopedQuarters, scopedTerritories);
+  // Pipeline stays in native $ only when the Territory filter has isolated "US" alone —
+  // any other scope (All, or a specific EU-* territory) needs the €-converted figure so
+  // it's either directly comparable across territories or consistent with the rest of
+  // the dashboard, which is always in €.
+  const pipelineIsUsdNative = terrFilter === 'US';
+  const agg = aggregate(scopedItems, scopedQuarters, scopedTerritories, DATA.pipeline_source, !pipelineIsUsdNative);
 
   document.getElementById('filter-summary').textContent = scopeLabel();
   const fyText = fyFilter === 'All' ? 'FY27–FY28' : fyFilter;
   const terrText = terrFilter === 'All' ? 'by territory' : `for ${terrFilter}`;
   document.getElementById('descA').textContent = `What each territory is projected to get, quarter over quarter (${fyText})`;
-  document.getElementById('descB').textContent = `Where the budget is going, quarter over quarter (${fyText})`;
-  document.getElementById('descC').textContent = `Total budget ${terrText}, ${fyText}`;
-  document.getElementById('descD').textContent = `Total opportunity count (pipeline) ${terrText}, ${fyText}`;
+  const fxRate = DATA.pipeline_fx_rate != null ? DATA.pipeline_fx_rate : 0.76;
+  document.getElementById('descP1').textContent = pipelineIsUsdNative
+    ? `Expected pipeline for US, quarter over quarter (${fyText}) — from the sheet's "Pivot table 1", shown in its native $ (no FX conversion).`
+    : `Expected pipeline ${terrText}, quarter over quarter (${fyText}) — from the sheet's "Pivot table 1". US pipeline ($) is converted to € at the sheet's own rate (≈${fxRate}, from Budget-Local/Budget-€ pairs) so every territory stacks on one axis.`;
+
+  // ---------- spend widget — native $ when the Territory filter has isolated US alone ----------
+  const bFmt = pipelineIsUsdNative ? fmtUSD : fmtEUR;
+  const bFmtK = pipelineIsUsdNative ? fmtUSDk : fmtEURk;
+  const bLabel = pipelineIsUsdNative ? 'Spend ($)' : 'Spend (EUR)';
+  document.getElementById('chartB-title').textContent = pipelineIsUsdNative ? 'Spend by territory, by quarter ($)' : 'Spend by territory, by quarter';
+  document.getElementById('descB').textContent = pipelineIsUsdNative
+    ? `Where the budget is going, quarter over quarter (${fyText}) — shown in its native $ (no FX conversion).`
+    : `Where the budget is going, quarter over quarter (${fyText})`;
 
   renderStackedChart('chartA', 'legendA', scopedTerritories, scopedQuarters, agg.opps_by_terr_qtr, fmtNum, v => v.toLocaleString('en-US'), 'Opportunities');
-  renderStackedChart('chartB', 'legendB', scopedTerritories, scopedQuarters, agg.spend_by_terr_qtr, fmtEUR, fmtEURk, 'Spend (EUR)');
+  renderStackedChart('chartB', 'legendB', scopedTerritories, scopedQuarters, agg.spend_by_terr_qtr, bFmt, bFmtK, bLabel);
   renderQuarterHeatmap('chartA-hm', 'legendA-hm', scopedTerritories, scopedQuarters, agg.opps_by_terr_qtr, fmtNum, 'Opps');
-  renderQuarterHeatmap('chartB-hm', 'legendB-hm', scopedTerritories, scopedQuarters, agg.spend_by_terr_qtr, fmtEUR, 'Spend');
+  renderQuarterHeatmap('chartB-hm', 'legendB-hm', scopedTerritories, scopedQuarters, agg.spend_by_terr_qtr, bFmt, 'Spend');
 
   const terrByCoverage = scopedTerritories.slice().filter(t => agg.opps_total_by_terr[t] > 0).sort((a, b) => {
     const covA = agg.opps_by_terr_qtr[a].filter(v => (v || 0) > 0).length;
@@ -1401,22 +1466,22 @@ function draw() {
   renderChannelHeatmap('chartI', 'legendI', terrByCoverage, agg.channels, agg.opps_by_channel_terr);
   buildChannelHeatmapTable('chartI-table', terrByCoverage, agg.channels, agg.opps_by_channel_terr);
 
-  const terrBySpend = scopedTerritories.slice().sort((a,b) => agg.spend_total_by_terr[b] - agg.spend_total_by_terr[a]);
-  const spendVals = terrBySpend.map(t => agg.spend_total_by_terr[t]);
-  const oppsVals = terrBySpend.map(t => agg.opps_total_by_terr[t]);
-
-  renderSimpleBarChart('chartC', terrBySpend, spendVals, fmtEUR, fmtEURk, 'Spend (EUR)');
-  renderSimpleBarChart('chartD', terrBySpend, oppsVals, fmtNum, v => v.toLocaleString('en-US'), 'Opps');
-
   buildQuarterTable('chartA-table', scopedTerritories, scopedQuarters, agg.opps_by_terr_qtr, fmtNum);
-  buildQuarterTable('chartB-table', scopedTerritories, scopedQuarters, agg.spend_by_terr_qtr, fmtEUR);
-  buildSimpleTable('chartC-table', terrBySpend, spendVals, fmtEUR, 'Spend');
-  buildSimpleTable('chartD-table', terrBySpend, oppsVals, fmtNum, 'Opps');
+  buildQuarterTable('chartB-table', scopedTerritories, scopedQuarters, agg.spend_by_terr_qtr, bFmt);
+
+  // ---------- pipeline widget — same scoping + chart components as Panels A/B ----------
+  const pFmt = pipelineIsUsdNative ? fmtUSD : fmtEUR;
+  const pFmtK = pipelineIsUsdNative ? fmtUSDk : fmtEURk;
+  const pLabel = pipelineIsUsdNative ? 'Pipeline ($)' : 'Pipeline (€ equiv.)';
+  document.getElementById('chartP-title').textContent = pipelineIsUsdNative ? 'Pipeline ($) by territory, by quarter' : 'Pipeline (€ equivalent) by territory, by quarter';
+  renderStackedChart('chartP', 'legendP', scopedTerritories, scopedQuarters, agg.pipeline_by_terr_qtr, pFmt, pFmtK, pLabel);
+  renderQuarterHeatmap('chartP-hm', 'legendP-hm', scopedTerritories, scopedQuarters, agg.pipeline_by_terr_qtr, pFmt, 'Pipeline');
+  buildQuarterTable('chartP-table', scopedTerritories, scopedQuarters, agg.pipeline_by_terr_qtr, pFmt);
 
   const detailItems = scopedItems.filter(x => terrFilter === 'All' || x.territory === terrFilter);
-  buildDetailTable('detailTable', DATA.channel_order, detailItems, currencyFilter);
+  buildDetailTable('detailTable', DATA.channel_order, detailItems, currencyFilter, DATA.pipeline_source, !pipelineIsUsdNative);
   document.getElementById('descE').textContent = currencyFilter === 'LOCAL'
-    ? 'Every planned line item, grouped by channel like the master sheet — showing each item’s original local-currency budget ($/€/£). Subtotals and the grand total stay in € (marked "(€)"), since amounts in different currencies can’t be summed directly. Respects the filters above.'
+    ? 'Every planned line item, grouped by channel like the master sheet — showing each item’s original local-currency budget ($/€/£). A subtotal sums in that currency when every item in it shares one (e.g. an all-US slice sums in $); a group that mixes currencies falls back to € (marked "(€)"). Respects the filters above.'
     : 'Every planned line item, grouped by channel like the master sheet — quarter and opps per item, subtotals per channel, grand total at the bottom. Respects the filters above.';
 }
 
