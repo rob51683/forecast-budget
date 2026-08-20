@@ -100,7 +100,31 @@
     font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
   }
   .viz-root { background: var(--page); min-height: 100vh; }
-  .wrap { max-width: 1200px; margin: 0 auto; padding: 32px 24px 48px; }
+  .page-layout { display: flex; align-items: flex-start; gap: 24px; max-width: 1400px; margin: 0 auto; padding: 32px 24px 48px; }
+  .wrap { flex: 1 1 auto; min-width: 0; max-width: 1200px; }
+
+  .filter-rail {
+    width: 210px; flex-shrink: 0;
+    position: sticky; top: 20px;
+    display: flex; flex-direction: column; gap: 16px;
+    background: var(--surface-1); border: 1px solid var(--border); border-radius: 10px;
+    padding: 16px;
+  }
+  .filter-rail .theme-toggle { align-self: stretch; justify-content: center; }
+  .filter-rail .filter-group { display: flex; flex-direction: column; align-items: stretch; gap: 7px; }
+  .filter-rail .filter-seg { flex-wrap: wrap; }
+  .filter-rail .filter-select { width: 100%; }
+  .filter-rail .filter-reset { width: 100%; text-align: center; }
+  .filter-rail .filter-summary { margin-left: 0; padding-top: 4px; border-top: 1px solid var(--border); }
+  .filter-rail-divider { height: 1px; background: var(--border); margin: 0; }
+  @media (max-width: 860px) {
+    .page-layout { flex-direction: column; }
+    .filter-rail { position: static; width: 100%; flex-direction: row; flex-wrap: wrap; align-items: center; }
+    .filter-rail .filter-group { flex-direction: row; align-items: center; }
+    .filter-rail .filter-select { width: auto; }
+    .filter-rail .filter-reset { width: auto; }
+    .filter-rail .filter-summary { border-top: none; padding-top: 0; margin-left: auto; }
+  }
 
   .top-row { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
   h1 { font-size: 24px; font-weight: 700; color: var(--text-primary); margin: 0 0 8px; }
@@ -130,11 +154,6 @@
   }
   .theme-toggle button.active { background: var(--terr-US); color: #fff; }
 
-  .filter-row {
-    display: flex; align-items: center; gap: 22px; flex-wrap: wrap;
-    margin-top: 20px; padding: 12px 16px;
-    background: var(--surface-1); border: 1px solid var(--border); border-radius: 10px;
-  }
   .filter-group { display: flex; align-items: center; gap: 9px; }
   .filter-label { font-size: 12px; font-weight: 600; color: var(--text-secondary); }
   .filter-seg {
@@ -248,25 +267,14 @@
 </head>
 <body>
 <div class="viz-root">
-  <div class="wrap">
-    <div class="top-row">
-      <div>
-        <h1>FY28 Budget Items — Opportunities &amp; Spend by Territory</h1>
-        <p class="subtitle" id="subtitle-text"></p>
-        <p class="data-status" id="data-status">
-          <span class="status-dot" id="status-dot"></span>
-          <span id="status-text">Loading…</span>
-          <button type="button" id="refresh-btn" class="refresh-btn">Refresh</button>
-        </p>
-      </div>
+  <div class="page-layout">
+    <aside class="filter-rail" role="group" aria-label="Filters and theme">
       <div class="theme-toggle" role="group" aria-label="Theme">
         <button type="button" data-theme-btn="light">Light</button>
         <button type="button" data-theme-btn="dark">Dark</button>
         <button type="button" data-theme-btn="system">System</button>
       </div>
-    </div>
-
-    <div class="filter-row" role="group" aria-label="Filters">
+      <div class="filter-rail-divider"></div>
       <div class="filter-group">
         <span class="filter-label">Fiscal year</span>
         <div class="filter-seg" id="fy-filter">
@@ -290,6 +298,18 @@
       </div>
       <button type="button" class="filter-reset" id="filter-reset">Reset filters</button>
       <span class="filter-summary" id="filter-summary"></span>
+    </aside>
+    <div class="wrap">
+    <div class="top-row">
+      <div>
+        <h1>FY28 Budget Items — Opportunities &amp; Spend by Territory</h1>
+        <p class="subtitle" id="subtitle-text"></p>
+        <p class="data-status" id="data-status">
+          <span class="status-dot" id="status-dot"></span>
+          <span id="status-text">Loading…</span>
+          <button type="button" id="refresh-btn" class="refresh-btn">Refresh</button>
+        </p>
+      </div>
     </div>
 
     <!-- Panel A: Opps by territory by quarter -->
@@ -338,12 +358,12 @@
           <p class="desc" id="descP1">Expected pipeline value per territory, quarter over quarter, from the sheet's pivot table</p>
         </div>
         <div class="view-seg" data-view-group="chartP">
-          <button type="button" data-view="bar" class="active">Bar</button>
+          <button type="button" data-view="bar">Bar</button>
           <button type="button" data-view="heatmap">Heatmap</button>
-          <button type="button" data-view="table">Table</button>
+          <button type="button" data-view="table" class="active">Table</button>
         </div>
       </div>
-      <div id="chartP-bar">
+      <div id="chartP-bar" style="display:none;">
         <svg id="chartP" viewBox="0 0 1100 400"></svg>
         <div class="legend" id="legendP"></div>
       </div>
@@ -351,7 +371,7 @@
         <svg id="chartP-hm" viewBox="0 0 1100 330"></svg>
         <div class="legend" id="legendP-hm"></div>
       </div>
-      <div id="chartP-table" style="display:none;"></div>
+      <div id="chartP-table"></div>
     </div>
 
     <!-- Panel B: Spend by territory by quarter -->
@@ -394,6 +414,7 @@
       <p>Source: live Google Sheet, auto-refreshed on every load (<a href="https://docs.google.com/spreadsheets/d/1uYimlEb3AbTUQ_Mev2is1z_EaOqiOtwK8GFdDyk1AmQ/edit?gid=436189910#gid=436189910" target="_blank" rel="noopener">open sheet</a>). Territory tags are cleaned from raw region codes — typo'd or drifted codes (e.g. a stray "EU-DE3"/"EU-DE4") are corrected using the item name; multi-region or DE-wide items roll up to "Other". New channel sections in the sheet are picked up automatically. If the live fetch is blocked by the browser, the dashboard falls back to the last known snapshot and flags this above.</p>
       <p id="footnote-2"></p>
     </footer>
+    </div>
   </div>
 </div>
 
@@ -1568,7 +1589,7 @@ document.querySelectorAll('.view-toggle').forEach(btn => {
   });
 });
 
-// three-way toggles (bar <-> heatmap <-> table) — Panels A & B
+// three-way toggles (bar <-> heatmap <-> table) — Panels A, P & B
 document.querySelectorAll('[data-view-group]').forEach(group => {
   const id = group.getAttribute('data-view-group');
   const views = { bar: document.getElementById(id + '-bar'), heatmap: document.getElementById(id + '-heatmap'), table: document.getElementById(id + '-table') };
