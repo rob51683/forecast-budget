@@ -448,30 +448,7 @@
     </div>
 
     <div id="us-view" style="display:none;">
-      <!-- Panel US-1: Opportunities by channel, by quarter (US only) -->
-      <div class="card">
-        <div class="card-head">
-          <div>
-            <h2>Opportunities by channel, by quarter (US)</h2>
-            <p class="desc" id="descUSOpps">Opps generated per channel, quarter over quarter — US only.</p>
-          </div>
-        </div>
-        <div id="usOppsByChannel"></div>
-      </div>
-
-      <!-- Panel US-2: Pipeline by channel, by quarter (US only) -->
-      <div class="card">
-        <div class="card-head">
-          <div>
-            <h2>Pipeline by channel, by quarter (US)</h2>
-            <p class="desc" id="descUSPipeline">Pipeline $ generated per channel, quarter over quarter — US only.</p>
-          </div>
-        </div>
-        <div id="usPipelineByChannel"></div>
-        <p class="desc" id="usPipelineNote" style="margin-top:10px;"></p>
-      </div>
-
-      <!-- Panel US-3: Revenue waterfall, actual to FY28 plan -->
+      <!-- Panel US-1: Revenue waterfall, actual to FY28 plan -->
       <div class="card">
         <div class="card-head">
           <div>
@@ -482,6 +459,29 @@
         <svg id="usWaterfall" viewBox="0 0 1100 400"></svg>
         <div class="legend" id="legendWaterfall"></div>
         <p class="desc" id="usWaterfallNote" style="margin-top:10px;"></p>
+      </div>
+
+      <!-- Panel US-2: Opportunities by channel, by quarter (US only) -->
+      <div class="card">
+        <div class="card-head">
+          <div>
+            <h2>Opportunities by channel, by quarter (US)</h2>
+            <p class="desc" id="descUSOpps">Opps generated per channel, quarter over quarter — US only. Click a channel to see the line items behind it.</p>
+          </div>
+        </div>
+        <div id="usOppsByChannel"></div>
+      </div>
+
+      <!-- Panel US-3: Pipeline by channel, by quarter (US only) -->
+      <div class="card">
+        <div class="card-head">
+          <div>
+            <h2>Pipeline by channel, by quarter (US)</h2>
+            <p class="desc" id="descUSPipeline">Pipeline $ generated per channel, quarter over quarter — US only.</p>
+          </div>
+        </div>
+        <div id="usPipelineByChannel"></div>
+        <p class="desc" id="usPipelineNote" style="margin-top:10px;"></p>
       </div>
 
       <!-- Panel US-4: full line-item detail, US only, always in $ -->
@@ -1680,6 +1680,115 @@ function buildExpandableChannelTable(containerId, quarters, channels, matrix, va
   container.appendChild(table);
 }
 
+// Per-item rows behind each channel's subtotal in buildExpandableChannelQuarterTable — feeds
+// the "see details" drill-down under each channel row, laid out on the same quarter columns as
+// the table itself (one line item per row, its value placed under the one quarter it falls in).
+function itemDetailsByChannel(items, quarters, valueKey) {
+  const byChannel = {};
+  items.forEach(x => {
+    const v = x[valueKey];
+    if (v == null || !x.channel || !quarters.includes(x.fyQtr)) return;
+    if (!byChannel[x.channel]) byChannel[x.channel] = [];
+    const qi = quarters.indexOf(x.fyQtr);
+    const values = quarters.map(() => 0);
+    values[qi] = v;
+    byChannel[x.channel].push({ item: x.item, values, total: v });
+  });
+  return byChannel;
+}
+
+// Channel × quarter table with quarters as COLUMNS (matching the Global View's Pipeline-by-
+// territory table layout) and channels as expandable subtotal ROWS — click a channel to reveal
+// the individual line items behind it, on the same quarter columns as the row itself.
+function buildExpandableChannelQuarterTable(containerId, channels, quarters, matrix, itemDetails, valueFmt) {
+  const fmt = valueFmt || fmtNum;
+  const container = document.getElementById(containerId);
+  const table = document.createElement('table');
+  table.className = 'data-table';
+  const thead = document.createElement('thead');
+  const hr = document.createElement('tr');
+  hr.appendChild(document.createElement('th'));
+  quarters.forEach(q => { const th = document.createElement('th'); th.textContent = q; hr.appendChild(th); });
+  const thTotal = document.createElement('th'); thTotal.textContent = 'Total'; hr.appendChild(thTotal);
+  thead.appendChild(hr);
+  table.appendChild(thead);
+  const tbody = document.createElement('tbody');
+  const colTotals = quarters.map(() => 0);
+  let grandTotal = 0;
+
+  channels.forEach(ch => {
+    const rowVals = quarters.map(q => (matrix[ch] && matrix[ch][q]) || 0);
+    const rowTotal = rowVals.reduce((a, b) => a + b, 0);
+    rowVals.forEach((v, qi) => { colTotals[qi] += v; });
+    grandTotal += rowTotal;
+
+    const tr = document.createElement('tr');
+    tr.className = 'expandable-row';
+    const thC = document.createElement('th');
+    thC.style.textAlign = 'left';
+    const caret = document.createElement('span');
+    caret.className = 'expand-caret';
+    caret.textContent = '▸';
+    thC.appendChild(caret);
+    thC.appendChild(document.createTextNode(' ' + ch));
+    tr.appendChild(thC);
+    rowVals.forEach(v => { const td = document.createElement('td'); td.textContent = v > 0 ? fmt(v) : '—'; tr.appendChild(td); });
+    const tdT = document.createElement('td'); tdT.textContent = fmt(rowTotal); tdT.style.fontWeight = '700'; tr.appendChild(tdT);
+    tbody.appendChild(tr);
+
+    const subRows = [];
+    const details = (itemDetails[ch] || []).slice().sort((a, b) => b.total - a.total);
+    details.forEach(d => {
+      const subTr = document.createElement('tr');
+      subTr.className = 'expandable-sub-row';
+      subTr.style.display = 'none';
+      const thI = document.createElement('th');
+      thI.style.textAlign = 'left';
+      thI.style.paddingLeft = '30px';
+      thI.style.fontWeight = '400';
+      thI.style.color = 'var(--text-secondary)';
+      thI.textContent = d.item;
+      subTr.appendChild(thI);
+      d.values.forEach(v => { const td = document.createElement('td'); td.textContent = v > 0 ? fmt(v) : '—'; td.style.color = 'var(--text-secondary)'; subTr.appendChild(td); });
+      const tdDT = document.createElement('td'); tdDT.textContent = fmt(d.total); tdDT.style.color = 'var(--text-secondary)'; subTr.appendChild(tdDT);
+      tbody.appendChild(subTr);
+      subRows.push(subTr);
+    });
+    if (!subRows.length) {
+      const subTr = document.createElement('tr');
+      subTr.className = 'expandable-sub-row';
+      subTr.style.display = 'none';
+      const thI = document.createElement('th');
+      thI.style.textAlign = 'left';
+      thI.style.paddingLeft = '30px';
+      thI.style.fontWeight = '400';
+      thI.style.color = 'var(--text-muted)';
+      thI.textContent = 'No line items this period';
+      subTr.appendChild(thI);
+      quarters.forEach(() => subTr.appendChild(document.createElement('td')));
+      subTr.appendChild(document.createElement('td'));
+      tbody.appendChild(subTr);
+      subRows.push(subTr);
+    }
+    tr.addEventListener('click', () => {
+      const expanded = caret.textContent === '▾';
+      caret.textContent = expanded ? '▸' : '▾';
+      subRows.forEach(r => { r.style.display = expanded ? 'none' : ''; });
+    });
+  });
+
+  const trTotal = document.createElement('tr');
+  trTotal.className = 'detail-grand-row';
+  const thTot = document.createElement('th'); thTot.textContent = 'Total'; thTot.style.textAlign = 'left'; trTotal.appendChild(thTot);
+  colTotals.forEach(v => { const td = document.createElement('td'); td.textContent = fmt(v); td.style.fontWeight = '700'; trTotal.appendChild(td); });
+  const tdGrand = document.createElement('td'); tdGrand.textContent = fmt(grandTotal); tdGrand.style.fontWeight = '700'; trTotal.appendChild(tdGrand);
+  tbody.appendChild(trTotal);
+
+  table.appendChild(tbody);
+  container.innerHTML = '';
+  container.appendChild(table);
+}
+
 // =========================================================
 // Table views
 // =========================================================
@@ -1952,14 +2061,19 @@ function drawUSView(scopedQuarters) {
   // these channel tables the same way it already is from the channel-mix heatmap.
   const demandChannels = DATA.channel_order.filter(ch => ch !== 'Overhead');
 
+  // Both channel×quarter tables below use quarters as COLUMNS (matching the Global View's
+  // Pipeline-by-territory table) with channels as expandable subtotal ROWS — click a channel to
+  // see the individual line items behind it, per Rob's request.
   const oppsAgg = aggregateByChannelQtr(usItems, quarters, demandChannels, 'opps');
-  buildChannelHeatmapTable('usOppsByChannel', quarters, oppsAgg.channels, oppsAgg.matrix, fmtNum);
+  const oppsDetails = itemDetailsByChannel(usItems.filter(x => oppsAgg.channels.includes(x.channel)), quarters, 'opps');
+  buildExpandableChannelQuarterTable('usOppsByChannel', oppsAgg.channels, quarters, oppsAgg.matrix, oppsDetails, fmtNum);
 
   const pipeAgg = aggregateByChannelQtr(usItems, quarters, demandChannels, 'pipeline');
   const pipelineNote = document.getElementById('usPipelineNote');
   if (DATA.has_pipeline_column && pipeAgg.hasData) {
-    buildExpandableChannelTable('usPipelineByChannel', quarters, pipeAgg.channels, pipeAgg.matrix, fmtUSD);
-    pipelineNote.textContent = 'Click a quarter to expand it and see the per-channel breakdown.';
+    const pipeDetails = itemDetailsByChannel(usItems.filter(x => pipeAgg.channels.includes(x.channel)), quarters, 'pipeline');
+    buildExpandableChannelQuarterTable('usPipelineByChannel', pipeAgg.channels, quarters, pipeAgg.matrix, pipeDetails, fmtUSD);
+    pipelineNote.textContent = 'Click a channel to see the line items behind it.';
   } else {
     document.getElementById('usPipelineByChannel').innerHTML = '';
     pipelineNote.textContent = 'This snapshot predates the sheet\'s per-item "Pipeline" column — this table fills in once a live sync picks it up (use Refresh, top left).';
