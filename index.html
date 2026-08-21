@@ -281,6 +281,10 @@
   table.data-table td.detail-note { text-align: left; color: var(--text-muted); font-size: 11.5px; font-variant-numeric: normal; }
   table.data-table td.detail-center, table.data-table th.detail-center { text-align: center; }
   #detailTable { overflow-x: auto; }
+  table.data-table tr.expandable-row { cursor: pointer; }
+  table.data-table tr.expandable-row:hover td, table.data-table tr.expandable-row:hover th { background: var(--hover-wash); }
+  table.data-table tr.expandable-row .expand-caret { display: inline-block; width: 12px; color: var(--text-muted); font-size: 10px; }
+  table.data-table tr.expandable-sub-row td, table.data-table tr.expandable-sub-row th { border-bottom: 1px dashed var(--border); }
 
   footer.notes { margin-top: 22px; font-size: 11.5px; color: var(--text-muted); line-height: 1.6; }
   footer.notes p { margin: 0 0 4px; }
@@ -521,39 +525,47 @@ const SHEET_ID = '1uYimlEb3AbTUQ_Mev2is1z_EaOqiOtwK8GFdDyk1AmQ';
 const SHEET_GID = '436189910';
 const SHEET_CSV_URL = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:csv&gid=${SHEET_GID}`;
 const SHEET_EDIT_URL = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/edit?gid=${SHEET_GID}#gid=${SHEET_GID}`;
-// Pipeline is sourced from the sheet owner's own pivot table (SUM of Pipeline, rows = Regions,
-// columns = FY-QTR) rather than summed from a per-line-item lookup column, which would
-// multiply-count the same territory+quarter bucket across every line item sharing it.
-const PIPELINE_SHEET_NAME = 'Pivot table 1';
-const PIPELINE_CSV_URL = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:csv&sheet=${encodeURIComponent(PIPELINE_SHEET_NAME)}`;
+// The revenue waterfall is sourced from the "Pivot table 1" tab's "USE THIS ONE" section
+// (~A32:I38). Fetched by a FIXED GID, not by sheet name — Google's gviz name lookup silently
+// falls back to the main sheet (the same bug that made the old pipeline-by-territory pivot
+// fetch read the wrong tab all last round), so a name-based fetch of "Pivot table 1" is not
+// trustworthy. Rob confirmed this gid directly: .../edit?gid=965451789#gid=965451789.
+const PIVOT_GID = '965451789';
+const PIVOT_CSV_URL = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:csv&gid=${PIVOT_GID}`;
 
 const QUARTERS = ["FY27-Q2", "FY27-Q3", "FY27-Q4", "FY28-Q1", "FY28-Q2", "FY28-Q3", "FY28-Q4"];
 const TERRITORIES = ["US", "EU-France", "EU-UK", "EU-SWIAUS", "EU-Nordics", "EU-DE1", "EU-DE2", "Other"];
 
 // Revenue-waterfall data (Actual FY27 baseline, quarterly net-new deltas stacked by channel,
-// FY28 target). The bar totals are copied verbatim from the "USE THIS ONE" reference chart Rob
-// shared. This dashboard has no live read access to "Pivot table 1" yet (fetching it by sheet
-// name silently returns the wrong tab — same bug as the pipeline-by-territory pivot), so the
-// per-channel (Events/Inbound/Expansion/Partner) split within each bar is read from the
-// reference image's segment proportions rather than pulled live — each quarter's channel
-// values are estimates that sum to that quarter's real, sheet-sourced total exactly, but the
-// individual channel figures should be treated as approximate until Rob shares "Pivot table 1"'s
-// gid and this is wired to the live pivot table instead.
+// FY28 target). These numbers are pulled straight off "Pivot table 1"'s "USE THIS ONE" section
+// (rows 32-38, cols A-I: label, Actual FY27, the 6 quarterly deltas, FY28 total) via a direct
+// read of gid 965451789 — verified by hand (each quarter's Events/Inbound/Partner/Expansion
+// breakdown sums exactly to that quarter's TOTAL row). Used as the fallback/last-verified
+// snapshot if the live fetch (buildWaterfallFromPivotRows, below) fails or its self-check
+// doesn't validate — see drawUSView for which one actually gets rendered.
 const WATERFALL_CHANNELS = ['Partner', 'Expansion', 'Inbound', 'Events']; // fixed stack order, bottom to top
 const WATERFALL_COLOR_VAR = { Partner: '--wf-partner', Expansion: '--wf-expansion', Inbound: '--wf-inbound', Events: '--wf-events' };
 const US_WATERFALL_REFERENCE = {
-  approximate: true,
   steps: [
     { label: 'Actual FY27', amount: 1943000, isTotal: true },
-    { label: 'Q3FY27', amount: 250000, isTotal: false, breakdown: { Partner: 250000 } },
-    { label: 'Q4FY27', amount: 500000, isTotal: false, breakdown: { Partner: 100000, Events: 400000 } },
-    { label: 'Q1FY28', amount: 750000, isTotal: false, breakdown: { Partner: 300000, Expansion: 200000, Events: 250000 } },
-    { label: 'Q2FY28', amount: 1000000, isTotal: false, breakdown: { Partner: 450000, Inbound: 100000, Events: 450000 } },
-    { label: 'Q3FY28', amount: 1250000, isTotal: false, breakdown: { Partner: 450000, Inbound: 150000, Events: 650000 } },
-    { label: 'Q4FY28', amount: 2250000, isTotal: false, breakdown: { Partner: 900000, Expansion: 150000, Inbound: 450000, Events: 750000 } },
-    { label: 'FY28', amount: 7943000, isTotal: true },
+    { label: 'Q3FY27', amount: 250000, isTotal: false, breakdown: { Events: 125000, Expansion: 125000 } },
+    { label: 'Q4FY27', amount: 656250, isTotal: false, breakdown: { Events: 406250, Partner: 250000 } },
+    { label: 'Q1FY28', amount: 750000, isTotal: false, breakdown: { Events: 250000, Partner: 250000, Expansion: 250000 } },
+    { label: 'Q2FY28', amount: 1343750, isTotal: false, breakdown: { Events: 625000, Inbound: 187500, Partner: 531250 } },
+    { label: 'Q3FY28', amount: 1112500, isTotal: false, breakdown: { Events: 350000, Inbound: 218750, Partner: 543750 } },
+    { label: 'Q4FY28', amount: 1950000, isTotal: false, breakdown: { Events: 437500, Inbound: 218750, Partner: 1043750, Expansion: 250000 } },
+    { label: 'FY28', amount: 8005500, isTotal: true },
   ],
 };
+const WATERFALL_QUARTER_LABELS = ['Q3FY27', 'Q4FY27', 'Q1FY28', 'Q2FY28', 'Q3FY28', 'Q4FY28'];
+function waterfallChannelKeyFor(label) {
+  const l = (label || '').toLowerCase();
+  if (l.includes('partner')) return 'Partner';
+  if (l.includes('expansion')) return 'Expansion';
+  if (l.includes('inbound')) return 'Inbound';
+  if (l.includes('event')) return 'Events';
+  return null;
+}
 
 const REGION_MAP = {
   'us': 'US',
@@ -635,32 +647,51 @@ function deriveUsdToEurRate(lineItems) {
   ratios.sort((a, b) => a - b);
   return ratios[Math.floor(ratios.length / 2)];
 }
-// Pipeline is read from the sheet owner's own pivot table ("Pivot table 1": SUM of Pipeline,
-// rows = Regions, columns = FY-QTR). Values are kept in NATIVE currency here (US rows are $,
-// every other row is €) — conversion to a single shared axis happens later in aggregate(),
-// only when more than just "US" is being displayed.
-function buildPipelineFromPivotRows(rows, usdToEurRate) {
+// Parses "Pivot table 1"'s "USE THIS ONE" section into waterfall steps. Layout: a row
+// containing the literal text "USE THIS ONE" (the marker), then a header row, then one row per
+// revenue category (Events/Online Events, Inbound/Campaigns/BD, Partner, Expansion — matched by
+// keyword via waterfallChannelKeyFor, so a renamed/reordered/added category still gets picked up
+// as long as it contains one of those words), then a "TOTAL" row. Column A = row label; on the
+// TOTAL row, column B = Actual FY27 baseline, columns C-H = the 6 quarterly deltas (Q3FY27 through
+// Q4FY28, in that fixed order), column I = the FY28 total; category rows only populate C-H.
+// Self-validates before trusting the parse: for every quarter, the category rows must sum to
+// that quarter's TOTAL-row figure (this caught the last two rounds of "pivot table" parsing bugs
+// this session, so it isn't optional). Returns null on any structural mismatch, in which case the
+// caller keeps using the last-verified US_WATERFALL_REFERENCE snapshot instead of guessing.
+function buildWaterfallFromPivotRows(rows) {
   if (!rows || !rows.length) return null;
-  const header = rows[0];
-  const qCols = [];
-  header.forEach((cell, i) => { if (/^FY\d{2}-Q\d$/i.test((cell || '').trim())) qCols.push(i); });
-  if (!qCols.length) return null;
-  const quarters = qCols.map(i => header[i].trim());
-  const byTerr = {};
-  TERRITORIES.forEach(t => { byTerr[t] = new Array(quarters.length).fill(0); });
-  for (let r = 1; r < rows.length; r++) {
-    const row = rows[r];
-    const label = (row[0] || '').trim();
-    if (!label) continue;
-    const terr = regionTerritory(label) || 'Other';
-    if (!byTerr[terr]) continue;
-    qCols.forEach((ci, qi) => {
-      const v = parseMoney(row[ci]);
-      if (v == null) return;
-      byTerr[terr][qi] += v; // native currency: $ for US, € for everyone else
-    });
+  const markerIdx = rows.findIndex(r => r.some(c => (c || '').trim().toUpperCase() === 'USE THIS ONE'));
+  if (markerIdx === -1) return null;
+  const totalIdx = rows.findIndex((r, i) => i > markerIdx && (r[0] || '').trim().toUpperCase() === 'TOTAL');
+  if (totalIdx === -1) return null;
+  const totalRow = rows[totalIdx];
+  if (totalRow.length < 9) return null;
+  const actualFY27 = parseMoney(totalRow[1]);
+  const fy28Total = parseMoney(totalRow[8]);
+  const quarterTotals = totalRow.slice(2, 8).map(parseMoney);
+  if (actualFY27 == null || fy28Total == null || quarterTotals.some(v => v == null)) return null;
+
+  const channelRows = [];
+  for (let i = markerIdx + 1; i < totalIdx; i++) {
+    const key = waterfallChannelKeyFor(rows[i][0]);
+    if (!key) continue;
+    channelRows.push({ key, vals: rows[i].slice(2, 8).map(parseMoney) });
   }
-  return { quarters, byTerr, fxRate: usdToEurRate };
+  if (!channelRows.length) return null;
+
+  for (let qi = 0; qi < 6; qi++) {
+    const sum = channelRows.reduce((s, c) => s + (c.vals[qi] || 0), 0);
+    if (Math.abs(sum - quarterTotals[qi]) > 1) return null; // doesn't reconcile — don't trust it
+  }
+
+  const steps = [{ label: 'Actual FY27', amount: actualFY27, isTotal: true }];
+  WATERFALL_QUARTER_LABELS.forEach((label, qi) => {
+    const breakdown = {};
+    channelRows.forEach(c => { if (c.vals[qi]) breakdown[c.key] = (breakdown[c.key] || 0) + c.vals[qi]; });
+    steps.push({ label, amount: quarterTotals[qi], isTotal: false, breakdown });
+  });
+  steps.push({ label: 'FY28', amount: fy28Total, isTotal: true });
+  return { steps };
 }
 
 // Quote-aware CSV parser (handles quoted fields, embedded commas, escaped "" quotes, CRLF).
@@ -775,10 +806,10 @@ function deriveFY(fyQtr, budgetFY) {
 
 // Core aggregation, reusable for both the full dataset and any filtered slice of it
 // (a subset of line items, restricted to a given quarter axis and territory set).
-// pipelineSource/convertUsdToEur are optional — omitted entirely by the one unscoped call in
+// fxRate/convertUsdToEur are optional — omitted entirely by the one unscoped call in
 // buildDataFromRows() that feeds DATA.meta (topline totals, always shown in €, must never mix
 // currencies); draw() passes both explicitly for every filtered redraw.
-function aggregate(items, quarters, territories, pipelineSource, convertUsdToEur) {
+function aggregate(items, quarters, territories, fxRate, convertUsdToEur) {
   const active = items.filter(x => !x.removed);
 
   // US spend/budget uses its real native $ (budgetLocal, always $-denominated for US items)
@@ -831,21 +862,23 @@ function aggregate(items, quarters, territories, pipelineSource, convertUsdToEur
   const totalOppsTagged = cleanNum(Object.values(oppsTotalByTerr).reduce((s, v) => s + v, 0));
   const lineItemsCount = active.filter(x => x.budgetEUR !== null && (territories.includes(x.territory) || x.territory === null)).length;
 
-  // Pipeline (from the sheet's own pivot table) sliced to the same quarters/territories as
-  // everything else, so it respects the global filters exactly like spend_by_terr_qtr /
-  // opps_by_terr_qtr do. US is kept in native $ unless convertUsdToEur asks for € (needed
-  // whenever more than just "US" is being plotted, so every territory shares one axis).
-  const pSrc = pipelineSource || { quarters: [], byTerr: {}, fxRate: 0.76 };
+  // Pipeline — summed straight from each line item's own "Pipeline" column (sheet 1), the same
+  // way spend/opps are, rather than a separate pivot-table fetch (that fetch reads the wrong tab
+  // — Google's sheet-name lookup silently falls back to the main sheet — so it was producing
+  // bucket totals that didn't line up with what's actually on the line items). US is kept in
+  // native $ unless convertUsdToEur asks for € (needed whenever more than just "US" is being
+  // plotted, so every territory shares one axis).
   const pipelineByTerrQtr = {};
-  for (const t of territories) {
-    pipelineByTerrQtr[t] = quarters.map(q => {
-      const qi = pSrc.quarters.indexOf(q);
-      if (qi === -1 || !pSrc.byTerr[t]) return 0;
-      let v = pSrc.byTerr[t][qi] || 0;
-      if (t === 'US' && convertUsdToEur) v = v * (pSrc.fxRate || 0.76);
-      return cleanNum(v);
-    });
+  for (const t of territories) { pipelineByTerrQtr[t] = new Array(quarters.length).fill(0); }
+  for (const x of active) {
+    if (territories.includes(x.territory) && quarters.includes(x.fyQtr) && x.pipeline != null) {
+      const qi = quarters.indexOf(x.fyQtr);
+      let v = x.pipeline;
+      if (x.territory === 'US' && convertUsdToEur) v = v * (fxRate || 0.76);
+      pipelineByTerrQtr[x.territory][qi] += v;
+    }
   }
+  for (const t of territories) { pipelineByTerrQtr[t] = pipelineByTerrQtr[t].map(cleanNum); }
 
   return {
     spend_by_terr_qtr: spendByTerrQtr, opps_by_terr_qtr: oppsByTerrQtr,
@@ -870,10 +903,7 @@ async function loadLiveData(isRetry) {
   btn.disabled = true;
   setStatus('', isRetry ? 'Refreshing…' : 'Loading…');
   try {
-    const [resp, pivotResp] = await Promise.all([
-      fetch(SHEET_CSV_URL, { cache: 'no-store' }),
-      fetch(PIPELINE_CSV_URL, { cache: 'no-store' }).catch(() => null),
-    ]);
+    const resp = await fetch(SHEET_CSV_URL, { cache: 'no-store' });
     if (!resp.ok) throw new Error('HTTP ' + resp.status);
     const text = await resp.text();
     const rows = parseCSV(text);
@@ -892,23 +922,44 @@ async function loadLiveData(isRetry) {
       btn.disabled = false;
       return;
     }
-    const usdToEurRate = deriveUsdToEurRate(built.line_items);
-    let pipelineSource = null;
-    if (pivotResp && pivotResp.ok) {
-      pipelineSource = buildPipelineFromPivotRows(parseCSV(await pivotResp.text()), usdToEurRate);
-    }
-    built.pipeline_source = pipelineSource || FALLBACK_DATA.pipeline_source;
-    built.pipeline_fx_rate = usdToEurRate;
+    // Pipeline now comes straight from each line item's own "Pipeline" column (see aggregate()),
+    // not the separate "Pivot table 1" pivot fetch that used to live here — that fetch reads the
+    // wrong tab (Google's sheet-name lookup silently falls back to the main sheet), so its
+    // numbers didn't match the line items. fxRate is still needed to convert US $ pipeline to €
+    // whenever a view combines US with other territories.
+    built.pipeline_fx_rate = deriveUsdToEurRate(built.line_items);
     DATA = built;
     const now = new Date();
     setStatus('live', `Live from Google Sheet · updated ${now.toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'})}`);
   } catch (err) {
     DATA = FALLBACK_DATA;
-    setStatus('fallback', 'Live fetch unavailable — showing last known snapshot');
+    // Surface the actual error on the dashboard itself (not just devtools) — "Live fetch
+    // unavailable" alone gives no way to tell a CORS/network failure from bad sharing
+    // permissions from a parse error, all of which land here for different reasons.
+    console.error('Live sheet fetch failed:', err);
+    setStatus('fallback', `Live fetch unavailable (${err && err.message ? err.message : err}) — showing last known snapshot`);
   }
+  await refreshWaterfall();
   renderSubtitle();
   draw();
   btn.disabled = false;
+}
+
+// Independent fetch/parse of the waterfall's live source — deliberately isolated from the main
+// try/catch above so a hiccup fetching "Pivot table 1" can never take down the rest of the
+// dashboard, and vice versa. On any failure (network, parse, or the self-check in
+// buildWaterfallFromPivotRows not reconciling), LIVE_WATERFALL is simply left as whatever it was
+// — null on first load, in which case drawUSView falls back to US_WATERFALL_REFERENCE.
+let LIVE_WATERFALL = null;
+async function refreshWaterfall() {
+  try {
+    const resp = await fetch(PIVOT_CSV_URL, { cache: 'no-store' });
+    if (!resp.ok) { console.warn('Pivot table 1 fetch: HTTP', resp.status); return; }
+    const rows = parseCSV(await resp.text());
+    const wf = buildWaterfallFromPivotRows(rows);
+    if (wf) LIVE_WATERFALL = wf;
+    else console.warn('Pivot table 1 fetch succeeded but did not parse/validate as the "USE THIS ONE" section — keeping last-verified waterfall snapshot.');
+  } catch (err) { console.warn('Pivot table 1 fetch failed:', err); /* keep last known LIVE_WATERFALL / fallback */ }
 }
 
 // ---------- subtitle / footnote ----------
@@ -1540,6 +1591,95 @@ function aggregateByChannelQtr(items, quarters, channelOrder, valueKey) {
   return { channels, matrix, hasData: anyValue };
 }
 
+// Quarter rows with a collapsed total, expandable (click the row) to reveal the per-channel
+// breakdown underneath — "how the pipeline is built" for that quarter.
+function buildExpandableChannelTable(containerId, quarters, channels, matrix, valueFmt) {
+  const fmt = valueFmt || fmtNum;
+  const container = document.getElementById(containerId);
+  const table = document.createElement('table');
+  table.className = 'data-table';
+  const thead = document.createElement('thead');
+  const hr = document.createElement('tr');
+  ['Quarter', 'Total'].forEach(label => { const th = document.createElement('th'); th.textContent = label; hr.appendChild(th); });
+  thead.appendChild(hr);
+  table.appendChild(thead);
+  const tbody = document.createElement('tbody');
+  let grandTotal = 0;
+
+  quarters.forEach(q => {
+    const rowTotal = channels.reduce((s, c) => s + ((matrix[c] && matrix[c][q]) || 0), 0);
+    grandTotal += rowTotal;
+
+    const tr = document.createElement('tr');
+    tr.className = 'expandable-row';
+    const thQ = document.createElement('th');
+    thQ.style.textAlign = 'left';
+    const caret = document.createElement('span');
+    caret.className = 'expand-caret';
+    caret.textContent = '▸';
+    thQ.appendChild(caret);
+    thQ.appendChild(document.createTextNode(' ' + q));
+    tr.appendChild(thQ);
+    const tdTotal = document.createElement('td');
+    tdTotal.textContent = fmt(rowTotal);
+    tdTotal.style.fontWeight = '700';
+    tr.appendChild(tdTotal);
+    tbody.appendChild(tr);
+
+    const subRows = [];
+    channels.forEach(c => {
+      const v = (matrix[c] && matrix[c][q]) || 0;
+      if (!v) return;
+      const subTr = document.createElement('tr');
+      subTr.className = 'expandable-sub-row';
+      subTr.style.display = 'none';
+      const thC = document.createElement('th');
+      thC.style.textAlign = 'left';
+      thC.style.paddingLeft = '30px';
+      thC.style.fontWeight = '400';
+      thC.style.color = 'var(--text-secondary)';
+      thC.textContent = c;
+      subTr.appendChild(thC);
+      const tdV = document.createElement('td');
+      tdV.textContent = fmt(v);
+      tdV.style.color = 'var(--text-secondary)';
+      subTr.appendChild(tdV);
+      tbody.appendChild(subTr);
+      subRows.push(subTr);
+    });
+    if (!subRows.length) {
+      const subTr = document.createElement('tr');
+      subTr.className = 'expandable-sub-row';
+      subTr.style.display = 'none';
+      const thC = document.createElement('th');
+      thC.style.textAlign = 'left';
+      thC.style.paddingLeft = '30px';
+      thC.style.fontWeight = '400';
+      thC.style.color = 'var(--text-muted)';
+      thC.textContent = 'No channel activity this quarter';
+      subTr.appendChild(thC);
+      subTr.appendChild(document.createElement('td'));
+      tbody.appendChild(subTr);
+      subRows.push(subTr);
+    }
+    tr.addEventListener('click', () => {
+      const expanded = caret.textContent === '▾';
+      caret.textContent = expanded ? '▸' : '▾';
+      subRows.forEach(r => { r.style.display = expanded ? 'none' : ''; });
+    });
+  });
+
+  const trTotal = document.createElement('tr');
+  trTotal.className = 'detail-grand-row';
+  const thTot = document.createElement('th'); thTot.textContent = 'Total'; thTot.style.textAlign = 'left'; trTotal.appendChild(thTot);
+  const tdGrand = document.createElement('td'); tdGrand.textContent = fmt(grandTotal); trTotal.appendChild(tdGrand);
+  tbody.appendChild(trTotal);
+
+  table.appendChild(tbody);
+  container.innerHTML = '';
+  container.appendChild(table);
+}
+
 // =========================================================
 // Table views
 // =========================================================
@@ -1592,48 +1732,29 @@ function buildQuarterTable(containerId, territories, quarters, seriesByTerr, val
 // =========================================================
 // Full detail table (Panel E) — master-sheet-style line items
 // =========================================================
-function buildDetailTable(containerId, channelOrder, lineItems, currencyMode, pipelineSource, pipelineConvertUsdToEur, budgetUsdOverride) {
+function buildDetailTable(containerId, channelOrder, lineItems, currencyMode, budgetUsdOverride) {
   const container = document.getElementById(containerId);
   const isLocal = currencyMode === 'LOCAL';
   const table = document.createElement('table');
   table.className = 'data-table';
 
-  // Per-item Pipeline lookup: the main sheet has no per-line-item pipeline figure, so each row's
-  // Pipeline cell is the (territory, FY-QTR) bucket total from the sheet's own pivot table (the
-  // same source Panel P uses) — meaning multiple line items sharing a territory+quarter show the
-  // same figure by design, not a unique per-item value. US shows native $ unless the caller asks
-  // for the €-converted figure (pipelineConvertUsdToEur), mirroring Panels P/B exactly.
-  const pSrc = pipelineSource || { quarters: [], byTerr: {}, fxRate: 0.76 };
+  // Pipeline comes straight from each line item's own "Pipeline" column (sheet 1) — a genuine,
+  // additive-per-row $ figure. (This used to fall back to a territory+quarter bucket from a
+  // separate "Pivot table 1" pivot fetch, but that fetch was reading the wrong tab — Google's
+  // sheet-name lookup silently falls back to the main sheet — so its numbers didn't match the
+  // line items; dropped in favor of this simpler, correct, per-row source.)
   function pipelineValueFor(it) {
-    if (!it.territory || !it.fyQtr) return null;
-    const qi = pSrc.quarters.indexOf(it.fyQtr);
-    if (qi === -1 || !pSrc.byTerr[it.territory]) return null;
-    let v = pSrc.byTerr[it.territory][qi];
-    if (v == null) return null;
-    if (it.territory === 'US' && pipelineConvertUsdToEur) v = v * (pSrc.fxRate || 0.76);
-    return v;
+    return it.pipeline != null ? it.pipeline : null;
   }
-  // Whichever currency the whole Pipeline column is in for this scope: native $ only when the
-  // Territory filter has isolated US alone (pipelineConvertUsdToEur === false), € otherwise —
-  // same rule Panel P uses, so this single formatter is safe to apply to every row.
-  const fmtPipelineVal = v => pipelineConvertUsdToEur ? fmtEUR(v) : fmtUSD(v);
+  const fmtPipelineVal = v => fmtUSD(v);
   function fmtPipelineCell(it) {
     const v = pipelineValueFor(it);
     return v == null ? '—' : fmtPipelineVal(v);
   }
-  // A channel's Pipeline "subtotal" isn't a sum of the (repeated) per-row figures — that would
-  // multiply-count a territory+quarter bucket once for every line item drawing from it. Instead
-  // it's the sum of the *unique* territory+quarter buckets touched by that channel's items —
-  // i.e. "how much forecasted pipeline sits in the buckets this channel has activity in".
+  // A real per-row figure, so a subtotal/grand-total is just a direct sum.
   function dedupedPipelineSum(items) {
-    const seen = new Map();
-    items.forEach(it => {
-      const v = pipelineValueFor(it);
-      if (v == null) return;
-      const key = it.territory + '|' + it.fyQtr;
-      if (!seen.has(key)) seen.set(key, v);
-    });
-    return { sum: [...seen.values()].reduce((s, v) => s + v, 0), count: seen.size };
+    const vals = items.map(it => it.pipeline).filter(v => v != null);
+    return { sum: vals.reduce((s, v) => s + v, 0), count: vals.length };
   }
 
   const thead = document.createElement('thead');
@@ -1762,7 +1883,7 @@ function draw() {
   // so it's either directly comparable across territories or consistent with the rest of the
   // dashboard, which is always in €.
   const pipelineIsUsdNative = terrFilter === 'US';
-  const agg = aggregate(scopedItems, scopedQuarters, scopedTerritories, DATA.pipeline_source, !pipelineIsUsdNative);
+  const agg = aggregate(scopedItems, scopedQuarters, scopedTerritories, DATA.pipeline_fx_rate, !pipelineIsUsdNative);
 
   document.getElementById('filter-summary').textContent = scopeLabel();
   const fyText = fyFilter === 'All' ? 'FY27–FY28' : fyFilter;
@@ -1809,12 +1930,12 @@ function draw() {
   buildQuarterTable('chartP-table', scopedTerritories, scopedQuarters, agg.pipeline_by_terr_qtr, pFmt);
 
   const detailItems = scopedItems.filter(x => terrFilter === 'All' || x.territory === terrFilter);
-  buildDetailTable('detailTable', DATA.channel_order, detailItems, currencyFilter, DATA.pipeline_source, !pipelineIsUsdNative, pipelineIsUsdNative);
+  buildDetailTable('detailTable', DATA.channel_order, detailItems, currencyFilter, pipelineIsUsdNative);
   document.getElementById('descE').textContent = pipelineIsUsdNative
-    ? 'Every planned line item, grouped by channel like the master sheet — Budget and Pipeline shown in native $ since the Territory filter is US. Subtotals per channel, grand total at the bottom. Respects the filters above.'
+    ? 'Every planned line item, grouped by channel like the master sheet — Budget shown in native $ since the Territory filter is US, Pipeline from the sheet\'s own per-item "Pipeline" column (always $). Subtotals per channel, grand total at the bottom. Respects the filters above.'
     : (currencyFilter === 'LOCAL'
-      ? 'Every planned line item, grouped by channel like the master sheet — showing each item’s original local-currency budget ($/€/£). A subtotal sums in that currency when every item in it shares one (e.g. an all-US slice sums in $); a group that mixes currencies falls back to € (marked "(€)"). Respects the filters above.'
-      : 'Every planned line item, grouped by channel like the master sheet — quarter and opps per item, subtotals per channel, grand total at the bottom. Respects the filters above.');
+      ? 'Every planned line item, grouped by channel like the master sheet — showing each item’s original local-currency budget ($/€/£); Pipeline is from the sheet\'s own per-item "Pipeline" column (always $). A subtotal sums Budget in that currency when every item in it shares one (e.g. an all-US slice sums in $); a group that mixes currencies falls back to € (marked "(€)"). Respects the filters above.'
+      : 'Every planned line item, grouped by channel like the master sheet — quarter and opps per item; Pipeline is from the sheet\'s own per-item "Pipeline" column (always $). Subtotals per channel, grand total at the bottom. Respects the filters above.');
 
   drawUSView(scopedQuarters);
 }
@@ -1827,27 +1948,34 @@ function drawUSView(scopedQuarters) {
   if (!DATA) return;
   const quarters = scopedQuarters || (fyFilter === 'All' ? DATA.quarters : DATA.quarters.filter(q => q.startsWith(fyFilter)));
   const usItems = DATA.line_items.filter(x => !x.removed && x.territory === 'US' && (fyFilter === 'All' || x.fy === fyFilter));
+  // "Overhead" is an internal cost bucket, not a demand-gen channel — excluded from both of
+  // these channel tables the same way it already is from the channel-mix heatmap.
+  const demandChannels = DATA.channel_order.filter(ch => ch !== 'Overhead');
 
-  const oppsAgg = aggregateByChannelQtr(usItems, quarters, DATA.channel_order, 'opps');
+  const oppsAgg = aggregateByChannelQtr(usItems, quarters, demandChannels, 'opps');
   buildChannelHeatmapTable('usOppsByChannel', quarters, oppsAgg.channels, oppsAgg.matrix, fmtNum);
 
-  const pipeAgg = aggregateByChannelQtr(usItems, quarters, DATA.channel_order, 'pipeline');
+  const pipeAgg = aggregateByChannelQtr(usItems, quarters, demandChannels, 'pipeline');
   const pipelineNote = document.getElementById('usPipelineNote');
   if (DATA.has_pipeline_column && pipeAgg.hasData) {
-    buildChannelHeatmapTable('usPipelineByChannel', quarters, pipeAgg.channels, pipeAgg.matrix, fmtUSD);
-    pipelineNote.textContent = '';
+    buildExpandableChannelTable('usPipelineByChannel', quarters, pipeAgg.channels, pipeAgg.matrix, fmtUSD);
+    pipelineNote.textContent = 'Click a quarter to expand it and see the per-channel breakdown.';
   } else {
     document.getElementById('usPipelineByChannel').innerHTML = '';
     pipelineNote.textContent = 'This snapshot predates the sheet\'s per-item "Pipeline" column — this table fills in once a live sync picks it up (use Refresh, top left).';
   }
 
-  renderWaterfall('usWaterfall', 'legendWaterfall', US_WATERFALL_REFERENCE.steps, fmtUSD);
-  document.getElementById('usWaterfallNote').textContent = US_WATERFALL_REFERENCE.approximate
-    ? 'Bar totals are the exact Actual-FY27-to-FY28 figures from the reference chart; the Events / Inbound / Expansion / Partner split within each bar is read from that chart\'s proportions (each quarter\'s channels sum to its real total, but individual channel figures are approximate). Will switch to exact live figures once "Pivot table 1" (“USE THIS ONE”) is connected.'
-    : 'Net-new cARR by quarter, actual FY27 to the FY28 target — from the sheet\'s "Pivot table 1" ("USE THIS ONE").';
+  const waterfallData = LIVE_WATERFALL || US_WATERFALL_REFERENCE;
+  renderWaterfall('usWaterfall', 'legendWaterfall', waterfallData.steps, fmtUSD);
+  document.getElementById('usWaterfallNote').textContent = LIVE_WATERFALL
+    ? 'Net-new cARR by quarter, actual FY27 to the FY28 target — live from "Pivot table 1" (the "USE THIS ONE" section). Use Refresh (top left) to re-pull after editing the sheet.'
+    : 'Net-new cARR by quarter, actual FY27 to the FY28 target — from "Pivot table 1" (the "USE THIS ONE" section), last verified by hand; will switch to fully live once a fetch validates cleanly (use Refresh, top left).';
 
   const usDetailItems = DATA.line_items.filter(x => x.territory === 'US' && (fyFilter === 'All' || x.fy === fyFilter));
-  buildDetailTable('usDetailTable', DATA.channel_order, usDetailItems, 'EUR', DATA.pipeline_source, false, true);
+  buildDetailTable('usDetailTable', DATA.channel_order, usDetailItems, 'EUR', true);
+  document.getElementById('descUSDetail').textContent = DATA.has_pipeline_column
+    ? 'Every planned US line item, grouped by channel — Budget and Pipeline shown in native $, Pipeline from the sheet\'s own per-item "Pipeline" column. Subtotals per channel, grand total at the bottom.'
+    : 'Every planned US line item, grouped by channel — Budget shown in native $. Pipeline shows "—" because this snapshot predates the sheet\'s per-item "Pipeline" column; it fills in once a live sync picks it up (use Refresh, top left). Subtotals per channel, grand total at the bottom.';
 }
 
 // populate the territory filter once (the territory list is a fixed constant, known before data loads)
