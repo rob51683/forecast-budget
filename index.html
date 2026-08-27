@@ -738,6 +738,9 @@ function buildDataFromRows(rows) {
   const iFyQtr = idx(h => h.includes('qtr'));
   const iOpps = idx(h => h === 'opps');
   const iPipeline = idx(h => h === 'pipeline');
+  // Whitespace-normalized match (collapse repeated spaces) since this is a multi-word, hand-typed
+  // header rather than a single token like "pipeline" — less brittle to a stray extra space.
+  const iPipeSpend = idx(h => h.replace(/\s+/g, ' ') === 'pipe : spend ratio');
   if ([iItem, iTheater, iRegions, iBudgetEUR, iFyQtr, iOpps].some(i => i === -1)) {
     throw new Error('unrecognized sheet columns');
   }
@@ -776,13 +779,17 @@ function buildDataFromRows(rows) {
     // tagged with the same Channel as its budget line, which is what lets the US page break
     // pipeline down by channel rather than only by territory.
     const pipeline = iPipeline !== -1 ? parseMoney(get(iPipeline)) : null;
+    // Pipe:Spend ratio is a pre-computed sheet column (e.g. "3.5x" or similar) — displayed
+    // verbatim, not recomputed here, since we don't know its exact intended formatting.
+    const pipeSpendRaw = iPipeSpend !== -1 ? get(iPipeSpend) : '';
+    const pipeSpend = pipeSpendRaw !== '' ? pipeSpendRaw : null;
     const removed = status.toUpperCase() === 'REMOVE';
     const fyQtr = get(iFyQtr) || null;
     const note = get(iNote) || null;
     if (territory === null && budgetEUR === null && opps === null && fyQtr === null) continue; // placeholder row
     const fy = deriveFY(fyQtr, budgetFY);
     if (channel && !channelOrder.includes(channel)) channelOrder.push(channel);
-    lineItems.push({ channel, item, territory, fy, fyQtr, status: status || null, budgetEUR, budgetLocal, budgetLocalCurrency, opps, pipeline, note, removed });
+    lineItems.push({ channel, item, territory, fy, fyQtr, status: status || null, budgetEUR, budgetLocal, budgetLocalCurrency, opps, pipeline, pipeSpend, note, removed });
   }
 
   return {
@@ -792,6 +799,7 @@ function buildDataFromRows(rows) {
     line_items: lineItems,
     has_channel_column: iChannel !== -1,
     has_pipeline_column: iPipeline !== -1,
+    has_pipe_spend_column: iPipeSpend !== -1,
   };
 }
 
@@ -1869,11 +1877,11 @@ function buildDetailTable(containerId, channelOrder, lineItems, currencyMode, bu
   const thead = document.createElement('thead');
   const hr = document.createElement('tr');
   const budgetLabel = budgetUsdOverride ? 'Budget $' : (isLocal ? 'Budget (Local)' : 'Budget €');
-  [ 'Item', 'Territory', 'FY-QTR', 'Status', budgetLabel, 'Opps', 'Pipeline', 'Note'].forEach((label, i) => {
+  [ 'Item', 'Territory', 'FY-QTR', 'Status', budgetLabel, 'Opps', 'Pipeline', 'Pipe:Spend', 'Note'].forEach((label, i) => {
     const th = document.createElement('th');
     th.textContent = label;
     if (i === 1 || i === 2 || i === 3) th.className = 'detail-center';
-    if (i === 7) th.className = 'detail-note';
+    if (i === 8) th.className = 'detail-note';
     hr.appendChild(th);
   });
   thead.appendChild(hr);
@@ -1927,6 +1935,7 @@ function buildDetailTable(containerId, channelOrder, lineItems, currencyMode, bu
     const tdBudget = document.createElement('td'); tdBudget.textContent = budgetSubtotal(notRemoved, subBudget); trHead.appendChild(tdBudget);
     const tdOpps = document.createElement('td'); tdOpps.textContent = fmtNum(subOpps); trHead.appendChild(tdOpps);
     const tdSubPipeline = document.createElement('td'); tdSubPipeline.textContent = subPipeline.count ? fmtPipelineVal(subPipeline.sum) : '—'; trHead.appendChild(tdSubPipeline);
+    trHead.appendChild(document.createElement('td')); // Pipe:Spend — a ratio, not summable
     trHead.appendChild(document.createElement('td'));
     tbody.appendChild(trHead);
 
@@ -1945,6 +1954,7 @@ function buildDetailTable(containerId, channelOrder, lineItems, currencyMode, bu
       tr.appendChild(tdBudget2);
       const tdOpps2 = document.createElement('td'); tdOpps2.textContent = it.opps != null ? fmtNum(it.opps) : '—'; tr.appendChild(tdOpps2);
       const tdPipeline = document.createElement('td'); tdPipeline.textContent = fmtPipelineCell(it); tr.appendChild(tdPipeline);
+      const tdPipeSpend = document.createElement('td'); tdPipeSpend.textContent = it.pipeSpend != null ? it.pipeSpend : '—'; tr.appendChild(tdPipeSpend);
       const tdNote = document.createElement('td'); tdNote.textContent = it.note || '—'; tdNote.className = 'detail-note'; tr.appendChild(tdNote);
       tbody.appendChild(tr);
     });
@@ -1960,6 +1970,7 @@ function buildDetailTable(containerId, channelOrder, lineItems, currencyMode, bu
   const tdGB = document.createElement('td'); tdGB.textContent = budgetSubtotal(allNotRemoved, grandBudget); trGrand.appendChild(tdGB);
   const tdGO = document.createElement('td'); tdGO.textContent = fmtNum(grandOpps); trGrand.appendChild(tdGO);
   const tdGP = document.createElement('td'); tdGP.textContent = grandPipeline.count ? fmtPipelineVal(grandPipeline.sum) : '—'; trGrand.appendChild(tdGP);
+  trGrand.appendChild(document.createElement('td')); // Pipe:Spend — a ratio, not summable
   trGrand.appendChild(document.createElement('td'));
   tbody.appendChild(trGrand);
 
