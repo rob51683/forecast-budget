@@ -519,6 +519,16 @@ const fmtEURk = v => '€' + (v/1000).toLocaleString('en-US', {maximumFractionDi
 const fmtUSD = v => '$' + Math.round(v || 0).toLocaleString('en-US');
 const fmtUSDk = v => '$' + (v/1000).toLocaleString('en-US', {maximumFractionDigits: v % 1000 === 0 ? 0 : 1}) + 'k';
 const fmtNum = v => (v % 1 === 0 ? v : v.toFixed(1)).toString();
+// Pipe:Spend ratio: the sheet's own column mixes formats ("15.6x", plain numbers, "0", "-",
+// blank) for what's really just two cases — a real ratio, or "no cost" (nothing to divide by).
+// Round to a whole number with an "x" suffix for the former; collapse every no-cost variant
+// (0, "-", blank, unparseable) to the same "—" the rest of this table already uses for "no data".
+function fmtPipeSpend(raw) {
+  if (raw == null) return '—';
+  const n = parseFloat(String(raw).replace(/[^0-9.\-]/g, ''));
+  if (!Number.isFinite(n) || n === 0) return '—';
+  return Math.round(n) + 'x';
+}
 
 // ---------- live data pipeline ----------
 const SHEET_ID = '1uYimlEb3AbTUQ_Mev2is1z_EaOqiOtwK8GFdDyk1AmQ';
@@ -1954,7 +1964,7 @@ function buildDetailTable(containerId, channelOrder, lineItems, currencyMode, bu
       tr.appendChild(tdBudget2);
       const tdOpps2 = document.createElement('td'); tdOpps2.textContent = it.opps != null ? fmtNum(it.opps) : '—'; tr.appendChild(tdOpps2);
       const tdPipeline = document.createElement('td'); tdPipeline.textContent = fmtPipelineCell(it); tr.appendChild(tdPipeline);
-      const tdPipeSpend = document.createElement('td'); tdPipeSpend.textContent = it.pipeSpend != null ? it.pipeSpend : '—'; tr.appendChild(tdPipeSpend);
+      const tdPipeSpend = document.createElement('td'); tdPipeSpend.textContent = fmtPipeSpend(it.pipeSpend); tr.appendChild(tdPipeSpend);
       const tdNote = document.createElement('td'); tdNote.textContent = it.note || '—'; tdNote.className = 'detail-note'; tr.appendChild(tdNote);
       tbody.appendChild(tr);
     });
