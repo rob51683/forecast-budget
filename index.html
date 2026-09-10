@@ -2,7 +2,7 @@
 {
   "name": "Fy28 Territory Budget",
   "schemaVersion": 1,
-  "description": "FY28 budget planning dashboard, live-synced from the Google Sheet: opps, spend, and pipeline by territory/quarter (pipeline sourced from the sheet's own pivot table), a channel-mix heatmap (Overhead and Analyst excluded), and a full line-item detail table with Budget/Pipeline columns — all switching to native $ when the Territory filter isolates US, and € otherwise. Territories EU-South/EU-Central renamed to EU-France/EU-SWIAUS. Source: live Google Sheet.",
+  "description": "FY28 budget planning dashboard, live-synced from the Google Sheet: opps, spend, and pipeline by territory/quarter (pipeline sourced from the sheet's own pivot table), spend by channel/quarter, a territory×channel spend-concentration heatmap, a channel-mix heatmap (Overhead and Analyst excluded), and a full line-item detail table with Budget/Pipeline columns — all switching to native $ when the Territory filter isolates US, and € otherwise. Territories EU-South/EU-Central renamed to EU-France/EU-SWIAUS. Source: live Google Sheet.",
   "mcpTools": [],
   "mcpServerNames": []
 }
@@ -434,6 +434,44 @@
       <div id="chartB-table"></div>
     </div>
 
+    <!-- Panel BC: Spend by channel by quarter — Panel B pivoted onto the channel axis -->
+    <div class="card">
+      <div class="card-head">
+        <div>
+          <h2 id="chartBC-title">Spend by channel, by quarter</h2>
+          <p class="desc" id="descBC">Which channels the budget is going into, quarter over quarter</p>
+        </div>
+        <div class="view-seg" data-view-group="chartBC">
+          <button type="button" data-view="bar">Bar</button>
+          <button type="button" data-view="heatmap">Heatmap</button>
+          <button type="button" data-view="table" class="active">Table</button>
+        </div>
+      </div>
+      <div id="chartBC-bar" style="display:none;">
+        <svg id="chartBC" viewBox="0 0 1100 400"></svg>
+        <div class="legend" id="legendBC"></div>
+      </div>
+      <div id="chartBC-heatmap" style="display:none;">
+        <svg id="chartBC-hm" viewBox="0 0 1100 330"></svg>
+        <div class="legend" id="legendBC-hm"></div>
+      </div>
+      <div id="chartBC-table"></div>
+    </div>
+
+    <!-- Panel BT: Spend by territory × channel — the concentration read -->
+    <div class="card">
+      <div class="card-head">
+        <div>
+          <h2 id="chartBT-title">Spend by territory, by channel</h2>
+          <p class="desc" id="descBT">Where the budget concentrates — darker cells are bigger budgets; hollow cells mean nothing is planned for that territory/channel pair</p>
+        </div>
+        <button class="view-toggle" data-toggle-for="chartBT">View as table</button>
+      </div>
+      <div id="chartBT-chart"><svg id="chartBT" viewBox="0 0 1100 402"></svg></div>
+      <div id="chartBT-table" style="display:none;"></div>
+      <div class="legend" id="legendBT"></div>
+    </div>
+
 
     <!-- Panel E: full line-item detail, mirrors the master planning sheet -->
     <div class="card">
@@ -513,6 +551,21 @@ const FALLBACK_DATA = {"quarters":["FY27-Q2","FY27-Q3","FY27-Q4","FY28-Q1","FY28
   'EU-SWIAUS': '--terr-EU-SWIAUS', 'EU-Nordics': '--terr-EU-Nordics',
   'EU-DE1': '--terr-EU-DE1', 'EU-DE2': '--terr-EU-DE2', 'Other': '--terr-Other'
 };
+
+// Series colors for channel-keyed charts (Panel BC). Channels and territories are never
+// plotted in the same chart, so the categorical ramp is reused rather than a second one
+// invented — that way the new panel inherits both light and dark themes for free. Colors are
+// assigned by the channel's position in the sheet's own channel order, not by its rank in the
+// current slice, so a channel keeps its color as the filters change.
+const SERIES_PALETTE_VARS = [
+  '--terr-US', '--terr-EU-France', '--terr-EU-UK', '--terr-EU-SWIAUS',
+  '--terr-EU-Nordics', '--terr-EU-DE1', '--terr-EU-DE2', '--terr-Other'
+];
+function channelColorVar(channel) {
+  const order = (DATA && DATA.channel_order) || [];
+  const i = order.indexOf(channel);
+  return SERIES_PALETTE_VARS[(i === -1 ? 0 : i) % SERIES_PALETTE_VARS.length];
+}
 
 const fmtEUR = v => '€' + Math.round(v).toLocaleString('en-US');
 const fmtEURk = v => '€' + (v/1000).toLocaleString('en-US', {maximumFractionDigits: v % 1000 === 0 ? 0 : 1}) + 'k';
@@ -875,6 +928,51 @@ function aggregate(items, quarters, territories, fxRate, convertUsdToEur) {
   }
   for (const ch of channels) for (const t of territories) oppsByChannelTerr[ch][t] = cleanNum(oppsByChannelTerr[ch][t]);
 
+  // Spend by channel × quarter (Panel BC) — the spend-by-territory numbers pivoted onto the
+  // channel axis: same spendVal (so US switches to native $ when the Territory filter isolates
+  // it), same territory scope. Unlike the opps channel mix above, "Overhead" and "Analyst" stay
+  // in: they're real budget lines, and a spend view that dropped them wouldn't add up to the
+  // total spend shown everywhere else. Rows are ordered by total spend, biggest first.
+  const spendChannelTotals = {};
+  for (const x of active) {
+    if (!x.channel || !territories.includes(x.territory)) continue;
+    spendChannelTotals[x.channel] = (spendChannelTotals[x.channel] || 0) + spendVal(x);
+  }
+  const spendChannels = Object.keys(spendChannelTotals)
+    .filter(ch => spendChannelTotals[ch] > 0)
+    .sort((a, b) => spendChannelTotals[b] - spendChannelTotals[a]);
+  const spendByChannelQtr = {};
+  for (const ch of spendChannels) spendByChannelQtr[ch] = new Array(quarters.length).fill(0);
+  for (const x of active) {
+    if (spendByChannelQtr[x.channel] && territories.includes(x.territory) && quarters.includes(x.fyQtr)) {
+      spendByChannelQtr[x.channel][quarters.indexOf(x.fyQtr)] += spendVal(x);
+    }
+  }
+  for (const ch of spendChannels) spendByChannelQtr[ch] = spendByChannelQtr[ch].map(cleanNum);
+  // A channel whose every line item is still missing a quarter tag would plot as an all-zero
+  // row; drop those so the panel shows only what's actually on the quarter axis.
+  const spendChannelsOnAxis = spendChannels.filter(ch => spendByChannelQtr[ch].some(v => v > 0));
+
+  // Spend by channel × territory (Panel BT) — the concentration view: the same spend that
+  // Panel BC splits across quarters, split across territories instead. Deliberately summed over
+  // the same population as Panel BC (territory-tagged AND quarter-tagged) so the two panels
+  // always show the same grand total rather than silently diverging if the sheet ever gains an
+  // item with a territory but no quarter yet.
+  const spendByChannelTerr = {};
+  for (const ch of spendChannelsOnAxis) { spendByChannelTerr[ch] = {}; for (const t of territories) spendByChannelTerr[ch][t] = 0; }
+  for (const x of active) {
+    if (spendByChannelTerr[x.channel] && territories.includes(x.territory) && quarters.includes(x.fyQtr)) {
+      spendByChannelTerr[x.channel][x.territory] += spendVal(x);
+    }
+  }
+  for (const ch of spendChannelsOnAxis) for (const t of territories) spendByChannelTerr[ch][t] = cleanNum(spendByChannelTerr[ch][t]);
+  // Rows biggest-spending first (columns are already in spend order) so the concentration sits
+  // in the top-left corner and reads at a glance; empty territories drop out.
+  const spendTerritoriesOnAxis = territories
+    .filter(t => spendChannelsOnAxis.some(ch => spendByChannelTerr[ch][t] > 0))
+    .sort((a, b) => spendChannelsOnAxis.reduce((s, ch) => s + spendByChannelTerr[ch][b], 0)
+                  - spendChannelsOnAxis.reduce((s, ch) => s + spendByChannelTerr[ch][a], 0));
+
   const untaggedBudget = cleanNum(active.filter(x => x.territory === null).reduce((s, x) => s + (x.budgetEUR || 0), 0));
   const totalSpendAll = cleanNum(Object.values(spendTotalByTerr).reduce((s, v) => s + v, 0) + untaggedBudget);
   const totalOppsTagged = cleanNum(Object.values(oppsTotalByTerr).reduce((s, v) => s + v, 0));
@@ -902,6 +1000,8 @@ function aggregate(items, quarters, territories, fxRate, convertUsdToEur) {
     spend_by_terr_qtr: spendByTerrQtr, opps_by_terr_qtr: oppsByTerrQtr,
     spend_total_by_terr: spendTotalByTerr, opps_total_by_terr: oppsTotalByTerr,
     channels, opps_by_channel_terr: oppsByChannelTerr,
+    spend_channels: spendChannelsOnAxis, spend_by_channel_qtr: spendByChannelQtr,
+    spend_by_channel_terr: spendByChannelTerr, spend_territories: spendTerritoriesOnAxis,
     pipeline_by_terr_qtr: pipelineByTerrQtr,
     meta: { total_spend_all: totalSpendAll, untagged_budget: untaggedBudget, total_opps_tagged: totalOppsTagged, line_items: lineItemsCount },
   };
@@ -1058,7 +1158,10 @@ function ttRow(label, color, value) {
 // =========================================================
 // Stacked bar chart (Panels A & B)
 // =========================================================
-function renderStackedChart(svgId, legendId, territories, quarters, seriesByTerr, valueFmt, axisFmt, yLabel) {
+function renderStackedChart(svgId, legendId, territories, quarters, seriesByTerr, valueFmt, axisFmt, yLabel, colorVarFor) {
+  // colorVarFor is optional — defaults to the territory palette, and Panel BC passes
+  // channelColorVar so the same component can plot a channel-keyed series.
+  const colorVar = colorVarFor || (t => TERR_COLOR_VAR[t]);
   const svg = document.getElementById(svgId);
   const W = 1100, H = 400;
   const legend0 = document.getElementById(legendId);
@@ -1101,7 +1204,7 @@ function renderStackedChart(svgId, legendId, territories, quarters, seriesByTerr
       const segH = (v / maxTotal) * plotH;
       const y = yCursor - segH;
       const isTop = idx === nonZeroTerrs.length - 1;
-      const color = `var(${TERR_COLOR_VAR[t]})`;
+      const color = `var(${colorVar(t)})`;
       if (isTop) {
         const r = 4;
         const h = Math.max(segH, r);
@@ -1131,7 +1234,7 @@ function renderStackedChart(svgId, legendId, territories, quarters, seriesByTerr
       title.textContent = q;
       box.appendChild(title);
       nonZeroTerrs.slice().reverse().forEach(t => {
-        box.appendChild(ttRow(t, `var(${TERR_COLOR_VAR[t]})`, valueFmt(seriesByTerr[t][qi] || 0)));
+        box.appendChild(ttRow(t, `var(${colorVar(t)})`, valueFmt(seriesByTerr[t][qi] || 0)));
       });
       const totalRow = document.createElement('div');
       totalRow.className = 'tt-total';
@@ -1159,7 +1262,7 @@ function renderStackedChart(svgId, legendId, territories, quarters, seriesByTerr
     item.className = 'legend-item';
     const sw = document.createElement('span');
     sw.className = 'legend-swatch';
-    sw.style.background = `var(${TERR_COLOR_VAR[t]})`;
+    sw.style.background = `var(${colorVar(t)})`;
     const lab = document.createElement('span');
     lab.textContent = t;
     item.appendChild(sw); item.appendChild(lab);
@@ -1442,12 +1545,22 @@ function renderQuarterHeatmap(svgId, legendId, territories, quarters, seriesByTe
 // =========================================================
 // Channel × territory heatmap (Panel A3) — with margin totals
 // =========================================================
-function renderChannelHeatmap(svgId, legendId, territories, channels, matrix) {
+function renderChannelHeatmap(svgId, legendId, territories, channels, matrix, opts) {
+  // opts is optional — omitted entirely by Panel A3 (opps), which keeps the original
+  // opportunity-flavoured labels. Panel BT passes money formatters and a continuous legend so
+  // the same component can render a spend matrix.
+  const o = opts || {};
+  const cellFmt = o.cellFmt || o.valueFmt || fmtNum;   // in-cell label (compact for money)
+  const ttFmt = o.valueFmt || fmtNum;                  // tooltip + legend (full precision)
+  const unitLabel = o.unitLabel || 'Opps';
+  const noneText = o.noneText || 'Not used here';
+  const hollowText = o.hollowText || 'Channel not used';
+  const legendMode = o.legendMode || 'count';          // 'count' = integer opp bands, 'value' = continuous
   const svg = document.getElementById(svgId);
   const W = 1100;
   const legend0 = document.getElementById(legendId);
   if (!territories.length || !channels.length) {
-    renderEmptyState(svg, W, 160, 'No opportunities for this filter');
+    renderEmptyState(svg, W, 160, o.emptyText || 'No opportunities for this filter');
     legend0.innerHTML = '';
     return;
   }
@@ -1502,7 +1615,7 @@ function renderChannelHeatmap(svgId, legendId, territories, channels, matrix) {
         const b = seqBucket(v, maxV);
         const lab = el('text', { x: x0 + w / 2, y: y0 + h / 2 + 4, 'text-anchor': 'middle', class: 'heat-cell-label' });
         lab.setAttribute('fill', `var(${SEQ_INK_VARS[b]})`);
-        lab.textContent = fmtNum(v);
+        lab.textContent = cellFmt(v);
         svg.appendChild(lab);
       }
       const hit = el('rect', { x: x0, y: y0, width: w, height: h, class: 'hit-rect' });
@@ -1513,7 +1626,7 @@ function renderChannelHeatmap(svgId, legendId, territories, channels, matrix) {
         title.className = 'tt-title';
         title.textContent = `${t} · ${c}`;
         box.appendChild(title);
-        box.appendChild(ttRow('Opps', v > 0 ? `var(${SEQ_VARS[seqBucket(v, maxV)]})` : 'var(--grid)', v > 0 ? fmtNum(v) : 'Not used here'));
+        box.appendChild(ttRow(unitLabel, v > 0 ? `var(${SEQ_VARS[seqBucket(v, maxV)]})` : 'var(--grid)', v > 0 ? ttFmt(v) : noneText));
         showTooltip(ev.clientX, ev.clientY, box);
       });
       hit.addEventListener('mouseleave', hideTooltip);
@@ -1527,7 +1640,9 @@ function renderChannelHeatmap(svgId, legendId, territories, channels, matrix) {
   const t2 = Math.max(t1 + 1, Math.ceil(maxV * 0.5));
   const t3 = Math.max(t2 + 1, Math.ceil(maxV * 0.75));
   const t4 = Math.max(t3 + 1, Math.ceil(maxV));
-  const ranges = [[1, t1], [t1 + 1, t2], [t2 + 1, t3], [t3 + 1, t4]];
+  const ranges = legendMode === 'value'
+    ? [[0, t1], [t1, t2], [t2, t3], [t3, t4]]
+    : [[1, t1], [t1 + 1, t2], [t2 + 1, t3], [t3 + 1, t4]];
   ranges.forEach((r, i) => {
     const item = document.createElement('div');
     item.className = 'legend-item';
@@ -1535,7 +1650,9 @@ function renderChannelHeatmap(svgId, legendId, territories, channels, matrix) {
     sw.className = 'legend-seq-swatch';
     sw.style.background = `var(${SEQ_VARS[i]})`;
     const lab = document.createElement('span');
-    lab.textContent = r[0] === r[1] ? `${r[0]} opp${r[0] === 1 ? '' : 's'}` : `${r[0]}–${r[1]} opps`;
+    lab.textContent = legendMode === 'value'
+      ? `${ttFmt(r[0])}–${ttFmt(r[1])}`
+      : (r[0] === r[1] ? `${r[0]} opp${r[0] === 1 ? '' : 's'}` : `${r[0]}–${r[1]} opps`);
     item.appendChild(sw); item.appendChild(lab);
     legend.appendChild(item);
   });
@@ -1544,7 +1661,7 @@ function renderChannelHeatmap(svgId, legendId, territories, channels, matrix) {
   const hsw = document.createElement('span');
   hsw.className = 'legend-hollow-swatch';
   const hlab = document.createElement('span');
-  hlab.textContent = 'Channel not used';
+  hlab.textContent = hollowText;
   hollowItem.appendChild(hsw); hollowItem.appendChild(hlab);
   legend.appendChild(hollowItem);
 }
@@ -2050,6 +2167,27 @@ function draw() {
   buildQuarterTable('chartA-table', scopedTerritories, scopedQuarters, agg.opps_by_terr_qtr, fmtNum);
   buildQuarterTable('chartB-table', scopedTerritories, scopedQuarters, agg.spend_by_terr_qtr, bFmt);
 
+  // ---------- spend-by-channel widget — same currency mode and scope as Panel B ----------
+  const bcChannels = agg.spend_channels;
+  document.getElementById('chartBC-title').textContent = pipelineIsUsdNative ? 'Spend by channel, by quarter ($)' : 'Spend by channel, by quarter';
+  document.getElementById('descBC').textContent = pipelineIsUsdNative
+    ? `Which channels the budget is going into for US, quarter over quarter (${fyText}) — shown in its native $ (no FX conversion). Includes Overhead and Analyst, so it reconciles with total spend.`
+    : `Which channels the budget is going into ${terrFilter === 'All' ? 'across all territories' : `for ${terrFilter}`}, quarter over quarter (${fyText}). Includes Overhead and Analyst, so it reconciles with total spend.`;
+  renderStackedChart('chartBC', 'legendBC', bcChannels, scopedQuarters, agg.spend_by_channel_qtr, bFmt, bFmtK, bLabel, channelColorVar);
+  renderQuarterHeatmap('chartBC-hm', 'legendBC-hm', bcChannels, scopedQuarters, agg.spend_by_channel_qtr, bFmt, 'Spend');
+  buildQuarterTable('chartBC-table', bcChannels, scopedQuarters, agg.spend_by_channel_qtr, bFmt);
+
+  // ---------- spend concentration widget — territory × channel, same currency mode as Panel B ----------
+  document.getElementById('chartBT-title').textContent = pipelineIsUsdNative ? 'Spend by territory, by channel ($)' : 'Spend by territory, by channel';
+  document.getElementById('descBT').textContent = pipelineIsUsdNative
+    ? `Where the US budget concentrates by channel (${fyText}) — shown in its native $ (no FX conversion). Darker cells are bigger budgets; hollow cells mean nothing is planned for that channel.`
+    : `Where the budget concentrates across territory and channel (${fyText}) — darker cells are bigger budgets, so the heaviest bets sit top-left. Hollow cells mean nothing is planned for that territory/channel pair.`;
+  renderChannelHeatmap('chartBT', 'legendBT', agg.spend_territories, bcChannels, agg.spend_by_channel_terr, {
+    valueFmt: bFmt, cellFmt: bFmtK, unitLabel: 'Spend', legendMode: 'value',
+    emptyText: 'No spend for this filter', noneText: 'None planned', hollowText: 'None planned',
+  });
+  buildChannelHeatmapTable('chartBT-table', agg.spend_territories, bcChannels, agg.spend_by_channel_terr, bFmt);
+
   // ---------- pipeline widget — same scoping + chart components as Panels A/B ----------
   const pFmt = pipelineIsUsdNative ? fmtUSD : fmtEUR;
   const pFmtK = pipelineIsUsdNative ? fmtUSDk : fmtEURk;
@@ -2165,7 +2303,7 @@ function drawUSView(scopedQuarters) {
   });
 })();
 
-// two-way toggles (chart <-> table) — Panels A3/C/D
+// two-way toggles (chart <-> table) — Panels A3/C/D & BT
 document.querySelectorAll('.view-toggle').forEach(btn => {
   btn.addEventListener('click', () => {
     const id = btn.getAttribute('data-toggle-for');
@@ -2178,7 +2316,7 @@ document.querySelectorAll('.view-toggle').forEach(btn => {
   });
 });
 
-// three-way toggles (bar <-> heatmap <-> table) — Panels A, P & B
+// three-way toggles (bar <-> heatmap <-> table) — Panels A, P, B & BC
 document.querySelectorAll('[data-view-group]').forEach(group => {
   const id = group.getAttribute('data-view-group');
   const views = { bar: document.getElementById(id + '-bar'), heatmap: document.getElementById(id + '-heatmap'), table: document.getElementById(id + '-table') };
